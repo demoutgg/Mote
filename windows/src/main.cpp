@@ -63,8 +63,8 @@ void PositionPopupNearCursor() {
     if (y < info.rcWork.top) {
         y = cursor.y + 14;
     }
-    x = std::max(x, info.rcWork.left + 8);
-    y = std::max(y, info.rcWork.top + 8);
+    x = std::max<int>(x, static_cast<int>(info.rcWork.left) + 8);
+    y = std::max<int>(y, static_cast<int>(info.rcWork.top) + 8);
 
     SetWindowPos(g_popupWindow, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_SHOWWINDOW);
 }
