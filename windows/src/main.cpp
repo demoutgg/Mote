@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <algorithm>
 #include <string>
 
 namespace {
@@ -62,8 +63,8 @@ void PositionPopupNearCursor() {
     if (y < info.rcWork.top) {
         y = cursor.y + 14;
     }
-    x = max(x, info.rcWork.left + 8);
-    y = max(y, info.rcWork.top + 8);
+    x = std::max(x, info.rcWork.left + 8);
+    y = std::max(y, info.rcWork.top + 8);
 
     SetWindowPos(g_popupWindow, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_SHOWWINDOW);
 }
