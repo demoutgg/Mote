@@ -19,6 +19,7 @@ final class PopupController {
     private var previousApplication: NSRunningApplication?
     private var resizeStartFrame: NSRect?
     private var forcedRegularPolicy = false
+    private var contentConfigured = false
     private(set) var isVisible = false
     var onOpenSettings: (() -> Void)?
     var onOpenHistory: (() -> Void)?
@@ -46,16 +47,6 @@ final class PopupController {
         panel.animationBehavior = .utilityWindow
         panel.minSize = NSSize(width: 460, height: 340)
         panel.maxSize = NSSize(width: 900, height: 800)
-        let view = PopupView(
-            model: model,
-            store: store,
-            onClose: { [weak self] in self?.hide() },
-            onOpenSettings: { [weak self] in self?.onOpenSettings?() },
-            onOpenHistory: { [weak self] in self?.onOpenHistory?() },
-            onResize: { [weak self] translation in self?.resize(by: translation) },
-            onResizeEnd: { [weak self] in self?.finishResize() }
-        )
-        panel.contentView = NSHostingView(rootView: view)
 
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.keyCode == 53 {
@@ -104,6 +95,7 @@ final class PopupController {
         model.focusToken += 1
         isVisible = true
 
+        configureContentIfNeeded()
         applyConfiguredSize()
         if let origin = savedOrigin {
             panel.setFrameOrigin(origin)
@@ -165,6 +157,23 @@ final class PopupController {
         store.config.popupHeight = Double(panel.frame.height)
         store.save()
         saveOrigin()
+    }
+
+    // SwiftUI 只在第一次需要弹窗时加载，避免菜单栏常驻时占用图形框架内存。
+    private func configureContentIfNeeded() {
+        guard !contentConfigured else { return }
+        contentConfigured = true
+
+        let view = PopupView(
+            model: model,
+            store: store,
+            onClose: { [weak self] in self?.hide() },
+            onOpenSettings: { [weak self] in self?.onOpenSettings?() },
+            onOpenHistory: { [weak self] in self?.onOpenHistory?() },
+            onResize: { [weak self] translation in self?.resize(by: translation) },
+            onResizeEnd: { [weak self] in self?.finishResize() }
+        )
+        panel.contentView = NSHostingView(rootView: view)
     }
 
     private var savedOrigin: NSPoint? {
