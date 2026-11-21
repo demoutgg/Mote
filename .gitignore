@@ -1,0 +1,11 @@
+.DS_Store
+.build/
+dist/
+DerivedData/
+*.xcuserstate
+windows/build/
+windows/out/
+*.user
+*.suo
+*.log
+
