@@ -32,6 +32,7 @@ HWND g_setBaiduKey = nullptr;
 HWND g_setLLMCheck = nullptr;
 HWND g_setBaiduCheck = nullptr;
 HWND g_setLanguage = nullptr;
+HWND g_setLaunchCheck = nullptr;
 
 HWND g_historyWindow = nullptr;
 HWND g_historyList = nullptr;
@@ -70,6 +71,7 @@ enum : int {
     ID_SET_CANCEL = 1110,
     ID_SET_TEST_AI = 1111,
     ID_SET_TEST_BAIDU = 1112,
+    ID_SET_LAUNCH = 1113,
 
     ID_HISTORY_LIST = 1201,
     ID_HISTORY_COPY = 1202,
@@ -139,6 +141,59 @@ void CenterWindow(HWND window, int width, int height, int offsetY = 0) {
     const int x = work.left + (work.right - work.left - width) / 2;
     const int y = work.top + (work.bottom - work.top - height) / 2 + offsetY;
     SetWindowPos(window, HWND_TOPMOST, x, y, width, height, SWP_SHOWWINDOW);
+}
+
+bool IsLaunchAtLoginEnabled() {
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            0,
+            KEY_QUERY_VALUE,
+            &key) != ERROR_SUCCESS) {
+        return false;
+    }
+
+    DWORD type = 0;
+    DWORD size = 0;
+    const bool exists =
+        RegQueryValueExW(key, L"Lingolite", nullptr, &type, nullptr, &size) == ERROR_SUCCESS;
+    RegCloseKey(key);
+    return exists;
+}
+
+bool SetLaunchAtLogin(bool enabled) {
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            0,
+            KEY_SET_VALUE,
+            &key) != ERROR_SUCCESS) {
+        return false;
+    }
+
+    bool ok = false;
+    if (enabled) {
+        wchar_t path[MAX_PATH]{};
+        if (GetModuleFileNameW(nullptr, path, MAX_PATH) > 0) {
+            const std::wstring command = L"\"" + std::wstring(path) + L"\"";
+            ok = RegSetValueExW(
+                key,
+                L"Lingolite",
+                0,
+                REG_SZ,
+                reinterpret_cast<const BYTE*>(command.c_str()),
+                static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t))
+            ) == ERROR_SUCCESS;
+        }
+    } else {
+        const LONG result = RegDeleteValueW(key, L"Lingolite");
+        ok = result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND;
+    }
+
+    RegCloseKey(key);
+    return ok;
 }
 
 void PopulateLanguages(HWND combo) {
@@ -410,6 +465,12 @@ void ShowSettingsWindow() {
         g_setBaiduCheck,
         BM_SETCHECK,
         Config().baiduEnabled ? BST_CHECKED : BST_UNCHECKED,
+        0
+    );
+    SendMessageW(
+        g_setLaunchCheck,
+        BM_SETCHECK,
+        IsLaunchAtLoginEnabled() ? BST_CHECKED : BST_UNCHECKED,
         0
     );
 
@@ -783,10 +844,15 @@ LRESULT CALLBACK SettingsWindowProc(HWND window, UINT message, WPARAM wParam, LP
             WS_EX_CLIENTEDGE
         );
 
+        g_setLaunchCheck = CreateControl(
+            L"BUTTON", L"开机自动启动",
+            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+            20, y + 42, 170, 24, window, ID_SET_LAUNCH
+        );
         CreateControl(
-            L"STATIC", L"密钥保存在 Windows 凭据管理器；接口支持 OpenAI 兼容服务。",
+            L"STATIC", L"密钥保存在 Windows 凭据管理器",
             WS_CHILD | WS_VISIBLE,
-            20, y + 40, 520, 20, window, -1
+            210, y + 46, 330, 20, window, -1
         );
 
         CreateControl(
@@ -821,6 +887,15 @@ LRESULT CALLBACK SettingsWindowProc(HWND window, UINT message, WPARAM wParam, LP
             ReadSettings(config);
             Config() = config;
             SaveConfig();
+            if (!SetLaunchAtLogin(
+                    SendMessageW(g_setLaunchCheck, BM_GETCHECK, 0, 0) == BST_CHECKED)) {
+                MessageBoxW(
+                    window,
+                    L"无法写入开机自启动项，请检查注册表权限。",
+                    L"Lingolite",
+                    MB_OK | MB_ICONWARNING
+                );
+            }
             PopulateLanguages(g_languageCombo);
             ShowWindow(window, SW_HIDE);
             return 0;

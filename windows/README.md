@@ -14,6 +14,7 @@ C++20 + Win32 的轻量客户端，产物是单一 exe 加 OCR 运行所需的�
 - 鼠标附近/居中偏上的悬浮窗，Enter 翻译、Ctrl+Enter 换行
 - AI（OpenAI 兼容）与百度翻译可同时启用
 - 设置窗口，API Key 保存在 Windows 凭据管理器
+- 开机自动启动（HKCU Run，可在设置里开关）
 - 最近 100 条本地历史，支持复制与清空
 - 截图框选 + WinRT `Windows.Media.Ocr` 识别
 

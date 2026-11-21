@@ -21,6 +21,8 @@ struct SettingsView: View {
     @State private var baiduResult: String?
     @State private var baiduSucceeded = false
     @State private var showAdvanced = false
+    @State private var launchAtLogin = LaunchAtLogin.isEnabled
+    @State private var launchError: String?
 
     private let service = TranslationService()
 
@@ -84,6 +86,27 @@ struct SettingsView: View {
         .frame(width: 640, height: 620)
         .onExitCommand {
             onClose()
+        }
+        .onChange(of: launchAtLogin) { value in
+            do {
+                try LaunchAtLogin.set(value)
+            } catch {
+                launchAtLogin = LaunchAtLogin.isEnabled
+                launchError = error.localizedDescription
+            }
+        }
+        .alert(
+            "无法设置开机自启",
+            isPresented: Binding(
+                get: { launchError != nil },
+                set: { if !$0 { launchError = nil } }
+            )
+        ) {
+            Button("知道了") {
+                launchError = nil
+            }
+        } message: {
+            Text(launchError ?? "")
         }
     }
 
@@ -254,6 +277,13 @@ struct SettingsView: View {
 
     private var generalTab: some View {
         Form {
+            Section("启动") {
+                Toggle("开机自动启动", isOn: $launchAtLogin)
+                Text("登录时自动启动 Lingolite，下次登录生效；移动应用后需要重新勾选一次。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("快捷键") {
                 ForEach(ShortcutAction.allCases) { action in
                     HStack(spacing: 10) {
