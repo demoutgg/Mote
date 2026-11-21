@@ -1,14 +1,23 @@
+// 读取前台应用选区：优先 Accessibility，失败时模拟 ⌘C 并完整还原剪贴板；不处理 OCR。
 import AppKit
 import ApplicationServices
 import CoreGraphics
 import Darwin
 
 enum SelectionReader {
-    static func selectedText() -> String? {
-        if let text = accessibilitySelectedText(), !text.isEmpty {
-            return text
+    static var hasAccessibilityPermission: Bool {
+        AXIsProcessTrusted()
+    }
+
+    /// 在后台队列读取，避免模拟复制时的等待阻塞主线程刷新界面。
+    static func read(completion: @escaping (String) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let text = accessibilitySelectedText() ?? clipboardFallback() ?? ""
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            DispatchQueue.main.async {
+                completion(trimmed)
+            }
         }
-        return clipboardFallback()
     }
 
     private static func accessibilitySelectedText() -> String? {
@@ -32,19 +41,40 @@ enum SelectionReader {
         return selectedValue as? String
     }
 
-    /// 兼容不支持 AXSelectedText 的应用；会短暂占用剪贴板，随后恢复原内容。
+    /// 部分应用不暴露 AXSelectedText，只能模拟复制。复制期间会短暂改写剪贴板，
+    /// 结束后按原始 pasteboard items 还原，包含图片和文件列表。
     private static func clipboardFallback() -> String? {
+        guard hasAccessibilityPermission else { return nil }
+
         let pasteboard = NSPasteboard.general
-        let previous = pasteboard.string(forType: .string)
+        let savedItems = pasteboard.pasteboardItems?.map { item -> NSPasteboardItem in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    copy.setData(data, forType: type)
+                }
+            }
+            return copy
+        } ?? []
+        let changeCount = pasteboard.changeCount
 
-        pasteboard.clearContents()
         sendCommandC()
-        usleep(180_000)
 
-        let captured = pasteboard.string(forType: .string)
+        var captured: String?
+        let deadline = Date().addingTimeInterval(0.4)
+        while Date() < deadline {
+            if pasteboard.changeCount != changeCount {
+                captured = pasteboard.string(forType: .string)
+                break
+            }
+            usleep(8_000)
+        }
+
+        guard captured != nil else { return nil }
+
         pasteboard.clearContents()
-        if let previous {
-            pasteboard.setString(previous, forType: .string)
+        if !savedItems.isEmpty {
+            pasteboard.writeObjects(savedItems)
         }
         return captured
     }

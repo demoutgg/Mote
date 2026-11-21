@@ -1,3 +1,4 @@
+// 应用入口：菜单栏、全局快捷键、权限引导；不含翻译业务逻辑。
 import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
@@ -7,15 +8,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyManager: HotKeyManager?
     private var popupController: PopupController?
     private var settingsWindowController: SettingsWindowController?
+    private var isReadingSelection = false
 
     private let settingsStore = SettingsStore()
-    private lazy var translationService = TranslationService(store: settingsStore)
+    private let translationService = TranslationService()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        requestAccessibilityIfNeeded()
         setupStatusItem()
 
-        popupController = PopupController(store: settingsStore, translationService: translationService)
+        popupController = PopupController(store: settingsStore, service: translationService)
         settingsWindowController = SettingsWindowController(store: settingsStore)
 
         hotKeyManager = HotKeyManager(
@@ -24,7 +25,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] in
             self?.translateSelection()
         }
-        hotKeyManager?.register()
+        if hotKeyManager?.register() != true {
+            NSLog("Lingolite: failed to register global hotkey ⌥L")
+        }
+
+        requestAccessibilityIfNeeded()
     }
 
     private func setupStatusItem() {
@@ -54,8 +59,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func translateSelection() {
-        let selectedText = SelectionReader.selectedText() ?? ""
-        popupController?.show(sourceText: selectedText, autoTranslate: !selectedText.isEmpty)
+        guard let popupController else { return }
+        if popupController.isVisible {
+            popupController.hide()
+            return
+        }
+        guard !isReadingSelection else { return }
+
+        isReadingSelection = true
+        SelectionReader.read { [weak self] text in
+            guard let self else { return }
+            self.isReadingSelection = false
+            self.popupController?.show(sourceText: text)
+        }
     }
 
     @objc private func openSettings() {
@@ -74,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func requestAccessibilityIfNeeded() {
+        guard !SelectionReader.hasAccessibilityPermission else { return }
         let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         let options = [promptKey: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)

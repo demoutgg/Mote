@@ -1,18 +1,20 @@
+// 设置窗口的生命周期：每次打开都用当前配置重建草稿，关闭后释放。
 import AppKit
 import SwiftUI
 
-final class SettingsWindowController {
+final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let store: SettingsStore
     private var window: NSWindow?
 
     init(store: SettingsStore) {
         self.store = store
+        super.init()
     }
 
     func show() {
         if let window {
             window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            AppActivation.activate(NSApp)
             return
         }
 
@@ -20,7 +22,7 @@ final class SettingsWindowController {
             self?.window?.close()
         }
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 580, height: 560),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 640),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -28,10 +30,15 @@ final class SettingsWindowController {
         window.title = "Lingolite Settings"
         window.contentView = NSHostingView(rootView: settingsView)
         window.isReleasedWhenClosed = false
+        window.delegate = self
         window.center()
         self.window = window
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        AppActivation.activate(NSApp)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        window = nil
     }
 }
 

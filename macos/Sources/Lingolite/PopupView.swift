@@ -71,7 +71,7 @@ struct PopupView: View {
             }
         }
         .padding(14)
-        .frame(width: 460, height: 320)
+        .frame(width: 480, height: 340)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(

@@ -43,6 +43,13 @@ final class SettingsStore: ObservableObject {
     }
 
     func save() {
+        config.endpoint = config.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        config.model = config.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        config.targetLanguage = config.targetLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
+        if config.targetLanguage.isEmpty {
+            config.targetLanguage = "Simplified Chinese"
+        }
+
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let data = try? encoder.encode(config) {

@@ -27,14 +27,17 @@ v0.1 开发中。macOS 优先，Windows 随后跟进。
 
 ```bash
 cd macos
-swift build -c release
-./scripts/build-app.sh
-open dist/Lingolite.app
+./scripts/install.sh   # 构建并安装到 /Applications
+
+# 只打包、不安装：
+./scripts/build-app.sh && open dist/Lingolite.app
 ```
 
 首次使用需要在“系统设置 → 隐私与安全性 → 辅助功能”中授权 Lingolite，否则划词捕获会回退到模拟复制。
 
 默认快捷键：`⌥L`（Option + L）。
+
+说明：本地构建使用 ad-hoc 签名，重新编译后系统会把它当成新应用，可能需要重新勾选辅助功能权限。正式分发前会换成 Developer ID 签名。
 
 ## 配置
 
@@ -46,6 +49,8 @@ open dist/Lingolite.app
 - Target language 与 System prompt
 
 API Key 不写入 JSON，也不会出现在导出的配置里。
+
+设置页提供 OpenAI、DeepSeek、Ollama、LM Studio 的快速填充，以及直接测试连通性的按钮。
 
 ## Roadmap
 

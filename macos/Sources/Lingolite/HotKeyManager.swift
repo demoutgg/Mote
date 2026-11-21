@@ -14,8 +14,9 @@ final class HotKeyManager {
         self.action = action
     }
 
-    func register() {
-        guard hotKeyRef == nil else { return }
+    @discardableResult
+    func register() -> Bool {
+        guard hotKeyRef == nil else { return true }
 
         var eventType = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
@@ -31,7 +32,7 @@ final class HotKeyManager {
             return noErr
         }
 
-        InstallEventHandler(
+        let handlerStatus = InstallEventHandler(
             GetApplicationEventTarget(),
             callback,
             1,
@@ -39,9 +40,13 @@ final class HotKeyManager {
             userData,
             &eventHandlerRef
         )
+        guard handlerStatus == noErr else {
+            eventHandlerRef = nil
+            return false
+        }
 
         let hotKeyID = EventHotKeyID(signature: OSType(0x4C4E4754), id: 1)
-        RegisterEventHotKey(
+        let hotKeyStatus = RegisterEventHotKey(
             keyCode,
             modifiers,
             hotKeyID,
@@ -49,6 +54,12 @@ final class HotKeyManager {
             0,
             &hotKeyRef
         )
+        guard hotKeyStatus == noErr else {
+            RemoveEventHandler(eventHandlerRef)
+            eventHandlerRef = nil
+            return false
+        }
+        return true
     }
 
     deinit {
