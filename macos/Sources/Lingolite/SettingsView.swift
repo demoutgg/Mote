@@ -33,12 +33,12 @@ struct SettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             TabView {
+                generalTab
+                    .tabItem { Label("通用", systemImage: "gearshape") }
                 servicesTab
                     .tabItem { Label("服务", systemImage: "square.stack.3d.up") }
                 translationTab
                     .tabItem { Label("翻译", systemImage: "character.bubble") }
-                generalTab
-                    .tabItem { Label("通用", systemImage: "gearshape") }
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
