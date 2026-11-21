@@ -13,4 +13,9 @@ jobs:
         run: cmake -S windows -B build -A x64
       - name: Build
         run: cmake --build build --config Release
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lingolite-windows-x64
+          path: build/Release/Lingolite.exe
 
