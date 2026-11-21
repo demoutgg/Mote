@@ -114,8 +114,11 @@ final class TranslationService {
             throw TranslationError.invalidResponse("")
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
-            let errorBody = try await Self.readBody(bytes, limit: 4096)
-            throw TranslationError.httpStatus(httpResponse.statusCode, errorBody)
+            let errorData = try await Self.readBody(bytes, limit: 4096)
+            throw TranslationError.httpStatus(
+                httpResponse.statusCode,
+                String(data: errorData, encoding: .utf8) ?? ""
+            )
         }
 
         let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? ""
@@ -203,13 +206,13 @@ final class TranslationService {
         return content
     }
 
-    private static func readBody(_ bytes: URLSession.AsyncBytes, limit: Int) async throws -> String {
+    private static func readBody(_ bytes: URLSession.AsyncBytes, limit: Int) async throws -> Data {
         var data = Data()
         for try await byte in bytes {
             data.append(byte)
             if data.count >= limit { break }
         }
-        return String(data: data, encoding: .utf8) ?? ""
+        return data
     }
 }
 
