@@ -200,23 +200,13 @@ struct PopupView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             } else {
-                Text(store.config.model)
+                Text("\(model.sourceText.count) 字符")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    .monospacedDigit()
             }
 
             Spacer()
-
-            Text("\(model.sourceText.count) 字符")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-                .monospacedDigit()
-
-            Text("⌘↩ 翻译")
-                .font(.system(size: 9))
-                .foregroundStyle(.quaternary)
 
             Button {
                 model.translate()

@@ -40,37 +40,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let center = HotKeyCenter()
         hotKeyCenter = center
-        let registered = [
-            center.register(keyCode: UInt32(kVK_ANSI_A), modifiers: UInt32(optionKey), id: 1) { [weak self] in
-                self?.openManual()
-            },
-            center.register(keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(optionKey), id: 2) { [weak self] in
-                self?.translateSelection()
-            },
-            center.register(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(optionKey), id: 3) { [weak self] in
-                self?.translateClipboard()
-            },
-            center.register(keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(optionKey), id: 4) { [weak self] in
-                self?.captureAndTranslate()
-            },
-            center.register(
-                keyCode: UInt32(kVK_ANSI_S),
-                modifiers: UInt32(optionKey) | UInt32(shiftKey),
-                id: 5
-            ) { [weak self] in
-                self?.captureOCR()
-            },
-        ]
-        if registered.contains(false) {
-            NSLog("Lingolite: failed to register one or more global hotkeys")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                let alert = NSAlert()
-                alert.messageText = "快捷键被占用"
-                alert.informativeText = "⌥A / ⌥D / ⌥V / ⌥S / ⇧⌥S 中有组合键已被其他应用注册。请退出冲突的应用（例如 Bob、MoePeek）后重新启动 Lingolite。"
-                alert.addButton(withTitle: "知道了")
-                alert.runModal()
+        registerHotKeys()
+        settingsStore.$config
+            .map(\.keyBindings)
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.registerHotKeys()
+                self?.rebuildStatusMenu()
             }
-        }
+            .store(in: &cancellables)
 
         if !UserDefaults.standard.bool(forKey: OnboardingWindowController.completedKey) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
@@ -83,13 +62,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
         applyStatusIcon()
+        rebuildStatusMenu()
+    }
 
+    private func rebuildStatusMenu() {
+        guard let item = statusItem else { return }
         let menu = NSMenu()
-        menu.addItem(menuItem(title: "输入翻译", action: #selector(openManual), keyEquivalent: "a", modifiers: [.option]))
-        menu.addItem(menuItem(title: "选中翻译", action: #selector(translateSelection), keyEquivalent: "d", modifiers: [.option]))
-        menu.addItem(menuItem(title: "剪贴翻译", action: #selector(translateClipboard), keyEquivalent: "v", modifiers: [.option]))
-        menu.addItem(menuItem(title: "截图翻译", action: #selector(captureAndTranslate), keyEquivalent: "s", modifiers: [.option]))
-        menu.addItem(menuItem(title: "截图 OCR（复制）", action: #selector(captureOCR), keyEquivalent: "s", modifiers: [.option, .shift]))
+        for action in ShortcutAction.allCases {
+            let binding = settingsStore.config.binding(for: action)
+            let title = action == .screenshotOCR ? "截图 OCR（复制）" : action.title
+            menu.addItem(
+                menuItem(
+                    title: title,
+                    action: selector(for: action),
+                    keyEquivalent: binding.keyEquivalent,
+                    modifiers: binding.eventModifiers
+                )
+            )
+        }
         menu.addItem(menuItem(title: "使用指南…", action: #selector(showOnboarding)))
         menu.addItem(.separator())
         menu.addItem(menuItem(title: "设置…", action: #selector(openSettings), keyEquivalent: ","))
@@ -99,6 +89,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(menuItem(title: "关于 Lingolite", action: #selector(showAbout)))
         menu.addItem(menuItem(title: "退出 Lingolite", action: #selector(quit), keyEquivalent: "q"))
         item.menu = menu
+    }
+
+    private func selector(for action: ShortcutAction) -> Selector {
+        switch action {
+        case .input:
+            return #selector(openManual)
+        case .selection:
+            return #selector(translateSelection)
+        case .clipboard:
+            return #selector(translateClipboard)
+        case .screenshot:
+            return #selector(captureAndTranslate)
+        case .screenshotOCR:
+            return #selector(captureOCR)
+        }
+    }
+
+    private func registerHotKeys() {
+        guard let center = hotKeyCenter else { return }
+        center.unregisterAll()
+
+        var failures: [ShortcutAction] = []
+        for action in ShortcutAction.allCases {
+            let binding = settingsStore.config.binding(for: action)
+            let registered = center.register(
+                keyCode: binding.keyCode,
+                modifiers: binding.modifiers,
+                id: action.hotKeyID
+            ) { [weak self] in
+                self?.perform(action)
+            }
+            if !registered {
+                failures.append(action)
+            }
+        }
+
+        guard !failures.isEmpty else { return }
+        let list = failures
+            .map { "\($0.title)（\(settingsStore.config.binding(for: $0).display)）" }
+            .joined(separator: "、")
+        NSLog("Lingolite: hotkey registration failed for \(list)")
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            let alert = NSAlert()
+            alert.messageText = "快捷键被占用"
+            alert.informativeText = "\(list) 已被其他应用注册。请在设置中改成其他组合，或退出冲突的应用（例如 Bob、MoePeek）。"
+            alert.addButton(withTitle: "知道了")
+            alert.runModal()
+        }
+    }
+
+    private func perform(_ action: ShortcutAction) {
+        switch action {
+        case .input:
+            openManual()
+        case .selection:
+            translateSelection()
+        case .clipboard:
+            translateClipboard()
+        case .screenshot:
+            captureAndTranslate()
+        case .screenshotOCR:
+            captureOCR()
+        }
     }
 
     private func applyStatusIcon() {
@@ -157,7 +211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
         item.target = self
         if !keyEquivalent.isEmpty {
-            item.keyEquivalentModifierMask = modifiers
+            item.keyEquivalentModifierMask = modifiers.isEmpty ? [.command] : modifiers
         }
         return item
     }

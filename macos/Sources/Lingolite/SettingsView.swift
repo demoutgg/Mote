@@ -51,6 +51,11 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
+                if shortcutConflict {
+                    Label("存在重复快捷键", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
                 Spacer()
                 Button("取消") {
                     onClose()
@@ -59,6 +64,7 @@ struct SettingsView: View {
                     save()
                 }
                 .keyboardShortcut("s", modifiers: .command)
+                .disabled(shortcutConflict)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
@@ -237,11 +243,34 @@ struct SettingsView: View {
     private var generalTab: some View {
         Form {
             Section("快捷键") {
-                shortcutRow("输入翻译", "打开空弹窗手动输入", key: "⌥ A")
-                shortcutRow("选中翻译", "读取当前选中的文本", key: "⌥ D")
-                shortcutRow("剪贴翻译", "翻译剪贴板中的文本", key: "⌥ V")
-                shortcutRow("截图翻译", "框选屏幕区域，识别文字后翻译", key: "⌥ S")
-                shortcutRow("截图 OCR", "框选区域，识别后复制，不弹窗", key: "⇧⌥ S")
+                ForEach(ShortcutAction.allCases) { action in
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(action.title)
+                            Text(action.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        ShortcutRecorder(binding: draft.binding(for: action)) { binding in
+                            draft.setBinding(binding, for: action)
+                        }
+                        .frame(width: 96, height: 24)
+
+                        Button {
+                            draft.resetBinding(for: action)
+                        } label: {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("恢复默认")
+                    }
+                }
+
                 Text("选中翻译需要辅助功能权限；截图功能需要屏幕录制权限。若快捷键被 Bob、MoePeek 等应用占用，需要先关闭对方的同名快捷键。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -336,6 +365,14 @@ struct SettingsView: View {
         ServicePreset.detect(draft.endpoint)
     }
 
+    private var shortcutConflict: Bool {
+        let signatures = ShortcutAction.allCases.map { action -> String in
+            let binding = draft.binding(for: action)
+            return "\(binding.keyCode)-\(binding.modifiers)"
+        }
+        return Set(signatures).count != signatures.count
+    }
+
     private func runTest() {
         isTesting = true
         testResult = nil
@@ -405,23 +442,6 @@ struct SettingsView: View {
             } catch {
                 baiduSucceeded = false
                 baiduResult = error.localizedDescription
-            }
-        }
-    }
-
-    private func shortcutRow(_ title: String, _ detail: String, key: String) -> some View {
-        LabeledContent {
-            Text(key)
-                .font(.system(size: 12, design: .monospaced))
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
     }

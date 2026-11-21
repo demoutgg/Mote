@@ -75,13 +75,20 @@ final class HotKeyCenter {
         DispatchQueue.main.async(execute: action)
     }
 
-    deinit {
+    func unregisterAll() {
         for ref in hotKeyRefs {
             UnregisterEventHotKey(ref)
         }
+        hotKeyRefs.removeAll()
+        actions.removeAll()
         if let eventHandlerRef {
             RemoveEventHandler(eventHandlerRef)
+            self.eventHandlerRef = nil
         }
+    }
+
+    deinit {
+        unregisterAll()
     }
 }
 

@@ -4,6 +4,7 @@ import AppKit
 final class ScreenshotSelector {
     private var window: NSWindow?
     private var monitor: Any?
+    private var globalMonitor: Any?
 
     func start(completion: @escaping (CGRect?) -> Void) {
         guard window == nil else { return }
@@ -25,6 +26,7 @@ final class ScreenshotSelector {
         overlay.backgroundColor = .clear
         overlay.isOpaque = false
         overlay.hasShadow = false
+        overlay.isReleasedWhenClosed = false
         overlay.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let view = SelectionOverlayView(frame: NSRect(origin: .zero, size: screen.frame.size))
@@ -38,8 +40,8 @@ final class ScreenshotSelector {
         overlay.delegate = nil
 
         window = overlay
-        NSApp.setActivationPolicy(.regular)
         overlay.makeKeyAndOrderFront(nil)
+        overlay.orderFrontRegardless()
         overlay.makeFirstResponder(view)
         AppActivation.activate(NSApp)
 
@@ -49,17 +51,26 @@ final class ScreenshotSelector {
             completion(nil)
             return nil
         }
+
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return }
+            self?.dismiss()
+            completion(nil)
+        }
     }
 
     private func dismiss() {
         if let monitor {
             NSEvent.removeMonitor(monitor)
         }
+        if let globalMonitor {
+            NSEvent.removeMonitor(globalMonitor)
+        }
         monitor = nil
+        globalMonitor = nil
         window?.orderOut(nil)
         window?.close()
         window = nil
-        AppActivation.restoreAccessoryPolicy()
     }
 }
 

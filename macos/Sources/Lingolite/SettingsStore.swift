@@ -36,6 +36,7 @@ struct AppConfig: Codable, Equatable {
     var baiduAppID = ""
     var popupWidth = 520.0
     var popupHeight = 420.0
+    var keyBindings: [String: KeyBinding] = [:]
     var systemPrompt = defaultPrompt
 
     enum CodingKeys: String, CodingKey {
@@ -50,6 +51,7 @@ struct AppConfig: Codable, Equatable {
         case baiduAppID
         case popupWidth
         case popupHeight
+        case keyBindings
         case systemPrompt
     }
 
@@ -70,6 +72,7 @@ struct AppConfig: Codable, Equatable {
         baiduAppID = try container.decodeIfPresent(String.self, forKey: .baiduAppID) ?? ""
         popupWidth = try container.decodeIfPresent(Double.self, forKey: .popupWidth) ?? 520
         popupHeight = try container.decodeIfPresent(Double.self, forKey: .popupHeight) ?? 420
+        keyBindings = try container.decodeIfPresent([String: KeyBinding].self, forKey: .keyBindings) ?? [:]
         systemPrompt = try container.decodeIfPresent(String.self, forKey: .systemPrompt) ?? Self.defaultPrompt
     }
 
