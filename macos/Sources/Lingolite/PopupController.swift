@@ -8,21 +8,25 @@ final class LingolitePanel: NSPanel {
 }
 
 final class PopupController {
-    static let size = NSSize(width: 520, height: 440)
+    static let size = NSSize(width: 520, height: 420)
 
     private let panel: LingolitePanel
     private let model: PopupViewModel
+    private let store: SettingsStore
     private var escapeMonitor: Any?
     private var resignObserver: NSObjectProtocol?
+    private var moveObserver: NSObjectProtocol?
     private var previousApplication: NSRunningApplication?
     private var resizeStartFrame: NSRect?
     private var forcedRegularPolicy = false
     private(set) var isVisible = false
     var onOpenSettings: (() -> Void)?
 
-    private static let autosaveName = "LingolitePopupFrame"
+    private static let originXKey = "LingolitePopupOriginX"
+    private static let originYKey = "LingolitePopupOriginY"
 
     init(store: SettingsStore, service: TranslationService) {
+        self.store = store
         model = PopupViewModel(store: store, service: service)
         panel = LingolitePanel(
             contentRect: NSRect(origin: .zero, size: Self.size),
@@ -39,17 +43,15 @@ final class PopupController {
         panel.hasShadow = true
         panel.isMovableByWindowBackground = true
         panel.animationBehavior = .utilityWindow
-        panel.minSize = NSSize(width: 460, height: 360)
+        panel.minSize = NSSize(width: 460, height: 340)
         panel.maxSize = NSSize(width: 900, height: 800)
-        panel.setFrameAutosaveName(Self.autosaveName)
-
         let view = PopupView(
             model: model,
             store: store,
             onClose: { [weak self] in self?.hide() },
             onOpenSettings: { [weak self] in self?.onOpenSettings?() },
             onResize: { [weak self] translation in self?.resize(by: translation) },
-            onResizeEnd: { [weak self] in self?.resizeStartFrame = nil }
+            onResizeEnd: { [weak self] in self?.finishResize() }
         )
         panel.contentView = NSHostingView(rootView: view)
 
@@ -69,6 +71,14 @@ final class PopupController {
         ) { [weak self] _ in
             self?.hide(restoreFocus: false)
         }
+
+        moveObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            self?.saveOrigin()
+        }
     }
 
     deinit {
@@ -77,6 +87,9 @@ final class PopupController {
         }
         if let resignObserver {
             NotificationCenter.default.removeObserver(resignObserver)
+        }
+        if let moveObserver {
+            NotificationCenter.default.removeObserver(moveObserver)
         }
     }
 
@@ -88,10 +101,13 @@ final class PopupController {
         model.didCopy = false
         model.focusToken += 1
         isVisible = true
-        if hasSavedFrame {
+
+        applyConfiguredSize()
+        if let origin = savedOrigin {
+            panel.setFrameOrigin(origin)
             clampToVisibleScreen()
         } else {
-            positionNearMouse()
+            positionDefault()
         }
 
         panel.makeKeyAndOrderFront(nil)
@@ -134,15 +150,45 @@ final class PopupController {
         guard let start = resizeStartFrame else { return }
 
         let width = min(max(start.width + translation.width, 460), 900)
-        let height = min(max(start.height - translation.height, 360), 800)
+        let height = min(max(start.height - translation.height, 340), 800)
         var frame = start
         frame.origin.y = start.maxY - height
         frame.size = NSSize(width: width, height: height)
         panel.setFrame(frame, display: true)
     }
 
-    private var hasSavedFrame: Bool {
-        UserDefaults.standard.string(forKey: "NSWindow Frame \(Self.autosaveName)") != nil
+    private func finishResize() {
+        resizeStartFrame = nil
+        store.config.popupWidth = Double(panel.frame.width)
+        store.config.popupHeight = Double(panel.frame.height)
+        store.save()
+        saveOrigin()
+    }
+
+    private var savedOrigin: NSPoint? {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: Self.originXKey) != nil,
+              defaults.object(forKey: Self.originYKey) != nil else {
+            return nil
+        }
+        return NSPoint(
+            x: defaults.double(forKey: Self.originXKey),
+            y: defaults.double(forKey: Self.originYKey)
+        )
+    }
+
+    private func saveOrigin() {
+        guard isVisible, !panel.isMiniaturized else { return }
+        UserDefaults.standard.set(panel.frame.minX, forKey: Self.originXKey)
+        UserDefaults.standard.set(panel.frame.minY, forKey: Self.originYKey)
+    }
+
+    private func applyConfiguredSize() {
+        let width = min(max(store.config.popupWidth, 460), 900)
+        let height = min(max(store.config.popupHeight, 340), 800)
+        var frame = panel.frame
+        frame.size = NSSize(width: width, height: height)
+        panel.setFrame(frame, display: false)
     }
 
     private func activateAppIfNeeded() {
@@ -165,7 +211,7 @@ final class PopupController {
 
         var clamped = frame
         clamped.size.width = min(max(clamped.width, 460), visible.width)
-        clamped.size.height = min(max(clamped.height, 360), visible.height)
+        clamped.size.height = min(max(clamped.height, 340), visible.height)
         clamped.origin.x = min(max(clamped.minX, visible.minX), visible.maxX - clamped.width)
         clamped.origin.y = min(max(clamped.minY, visible.minY), visible.maxY - clamped.height)
         if clamped != frame {
@@ -173,21 +219,19 @@ final class PopupController {
         }
     }
 
-    private func positionNearMouse() {
-        let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first {
-            NSMouseInRect(mouse, $0.frame, false)
-        } ?? NSScreen.main
-        guard let visibleFrame = screen?.visibleFrame else { return }
-
-        let size = panel.frame.size
-        var origin = NSPoint(x: mouse.x + 14, y: mouse.y - size.height - 14)
-        if origin.y < visibleFrame.minY + 8 {
-            origin.y = mouse.y + 14
+    private func positionDefault() {
+        guard let visibleFrame = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame else {
+            return
         }
-        origin.x = min(max(origin.x, visibleFrame.minX + 8), visibleFrame.maxX - size.width - 8)
-        origin.y = min(max(origin.y, visibleFrame.minY + 8), visibleFrame.maxY - size.height - 8)
-        panel.setFrameOrigin(origin)
+        let size = panel.frame.size
+        let x = visibleFrame.midX - size.width / 2
+        let y = visibleFrame.midY - size.height / 2 + 80
+        panel.setFrameOrigin(
+            NSPoint(
+                x: max(visibleFrame.minX + 8, x),
+                y: min(y, visibleFrame.maxY - size.height - 20)
+            )
+        )
     }
 }
 

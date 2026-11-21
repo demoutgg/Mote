@@ -238,9 +238,35 @@ struct SettingsView: View {
         Form {
             Section("快捷键") {
                 shortcutRow("输入翻译", "打开空弹窗手动输入", key: "⌥ A")
-                shortcutRow("选中翻译", "框选屏幕区域，识别文字后翻译", key: "⌥ D")
+                shortcutRow("选中翻译", "读取当前选中的文本", key: "⌥ D")
                 shortcutRow("剪贴翻译", "翻译剪贴板中的文本", key: "⌥ V")
-                Text("选中翻译需要“隐私与安全性 → 屏幕录制”权限。若快捷键被 Bob、MoePeek 等应用占用，需要先关闭对方的同名快捷键。")
+                shortcutRow("截图翻译", "框选屏幕区域，识别文字后翻译", key: "⌥ S")
+                shortcutRow("截图 OCR", "框选区域，识别后复制，不弹窗", key: "⇧⌥ S")
+                Text("选中翻译需要辅助功能权限；截图功能需要屏幕录制权限。若快捷键被 Bob、MoePeek 等应用占用，需要先关闭对方的同名快捷键。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("弹窗") {
+                HStack {
+                    Text("宽度")
+                    Slider(value: $draft.popupWidth, in: 460...900, step: 10)
+                    Text("\(Int(draft.popupWidth)) pt")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .frame(width: 52, alignment: .trailing)
+                }
+
+                HStack {
+                    Text("高度")
+                    Slider(value: $draft.popupHeight, in: 340...800, step: 10)
+                    Text("\(Int(draft.popupHeight)) pt")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .frame(width: 52, alignment: .trailing)
+                }
+
+                Text("也可以在弹窗右下角拖动调整，位置会自动记住。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

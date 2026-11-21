@@ -7,7 +7,8 @@ struct OnboardingView: View {
     var onOpenSettings: () -> Void
     var onFinish: () -> Void
 
-    @State private var permissionGranted = OCREngine.hasScreenPermission
+    @State private var axGranted = SelectionReader.hasAccessibilityPermission
+    @State private var screenGranted = OCREngine.hasScreenPermission
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,7 +20,7 @@ struct OnboardingView: View {
                 VStack(spacing: 6) {
                     Text("欢迎使用 Lingolite")
                         .font(.system(size: 22, weight: .semibold))
-                    Text("选中文本，按 ⌥L，在鼠标旁得到 AI 翻译。")
+                    Text("选中文本或框选屏幕区域，按快捷键得到 AI 翻译。")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -30,23 +31,35 @@ struct OnboardingView: View {
             VStack(spacing: 14) {
                 step(
                     number: 1,
-                    title: "授予屏幕录制权限",
-                    detail: permissionGranted ? "已授权，可以框选屏幕区域识别文字。" : "框选翻译需要读取屏幕内容；不授权仍可手动输入。",
-                    status: permissionGranted ? "已授权" : "未授权",
-                    statusColor: permissionGranted ? .green : .orange
+                    title: "授予必要权限",
+                    detail: "选中翻译需要辅助功能；截图翻译需要屏幕录制。",
+                    status: axGranted && screenGranted ? "已完成" : "待授权",
+                    statusColor: axGranted && screenGranted ? .green : .orange
                 ) {
-                    if !permissionGranted {
-                        Button("去授权") {
-                            OCREngine.requestScreenPermission()
+                    VStack(alignment: .trailing, spacing: 6) {
+                        if !axGranted {
+                            Button("辅助功能") {
+                                SelectionReader.requestAccessibilityPermission()
+                            }
+                            .buttonStyle(.link)
                         }
-                        .buttonStyle(.link)
+                        if !screenGranted {
+                            Button("屏幕录制") {
+                                OCREngine.requestScreenPermission()
+                            }
+                            .buttonStyle(.link)
+                        }
+                        if axGranted && screenGranted {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        }
                     }
                 }
 
                 step(
                     number: 2,
                     title: "配置翻译服务",
-                    detail: "填自己的 API Key，支持 OpenAI、DeepSeek、Ollama 等兼容接口。"
+                    detail: "支持 OpenAI 兼容接口与百度翻译，可同时启用多个服务。"
                 ) {
                     Button("打开设置") {
                         onOpenSettings()
@@ -57,7 +70,7 @@ struct OnboardingView: View {
                 step(
                     number: 3,
                     title: "开始使用",
-                    detail: "⌥D 框选屏幕区域翻译；⌥A 输入翻译，⌥V 翻译剪贴板。",
+                    detail: "⌥D 选中翻译 · ⌥S 截图翻译\n⌥A 输入 · ⌥V 剪贴 · ⇧⌥S 截图 OCR",
                     accessory: { EmptyView() }
                 )
             }
@@ -85,7 +98,8 @@ struct OnboardingView: View {
         .frame(width: 540, height: 560)
         .background(Color(nsColor: .windowBackgroundColor))
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            permissionGranted = OCREngine.hasScreenPermission
+            axGranted = SelectionReader.hasAccessibilityPermission
+            screenGranted = OCREngine.hasScreenPermission
         }
     }
 

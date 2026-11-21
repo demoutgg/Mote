@@ -15,7 +15,8 @@ struct PopupView: View {
             header
             Divider().opacity(0.35)
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                sourceHeader
                 sourceEditor
                 actionRow
 
@@ -23,14 +24,13 @@ struct PopupView: View {
                     errorBanner(error)
                 }
 
+                resultHeader
+                    .padding(.top, 2)
                 resultSection
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
-            .padding(.bottom, 10)
-
-            Divider().opacity(0.35)
-            footer
+            .padding(.bottom, 14)
         }
         .frame(minWidth: 460, maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
         .background(.regularMaterial)
@@ -123,22 +123,12 @@ struct PopupView: View {
     }
 
     private var sourceEditor: some View {
-        ZStack(alignment: .topLeading) {
-            if model.sourceText.isEmpty {
-                Text("输入要翻译的文本，或按 ⌥D 框选屏幕区域")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 5)
-                    .allowsHitTesting(false)
-            }
-
-            TranslatingTextEditor(
-                text: $model.sourceText,
-                focusToken: model.focusToken,
-                onSubmit: { model.translate() }
-            )
-        }
+        TranslatingTextEditor(
+            text: $model.sourceText,
+            placeholder: "输入要翻译的文本，或按 ⌥D 框选屏幕区域",
+            focusToken: model.focusToken,
+            onSubmit: { model.translate() }
+        )
         .frame(height: 84)
         .padding(6)
         .background(
@@ -149,6 +139,56 @@ struct PopupView: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.07))
         )
+    }
+
+    private var sourceHeader: some View {
+        HStack {
+            Text("原文")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            if !model.sourceText.isEmpty {
+                Button("清空") {
+                    model.clear()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private var resultHeader: some View {
+        HStack(spacing: 6) {
+            Text("译文")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            if !model.results.isEmpty {
+                Text("\(model.results.count) 个服务")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+
+            Button {
+                model.copyOutput()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: model.didCopy ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text(model.didCopy ? "已复制" : "复制")
+                }
+                .font(.system(size: 10))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(model.primaryText.isEmpty ? Color.secondary.opacity(0.4) : Color.secondary)
+            .disabled(model.primaryText.isEmpty)
+            .help("复制译文")
+        }
     }
 
     private var actionRow: some View {
@@ -173,6 +213,10 @@ struct PopupView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
                 .monospacedDigit()
+
+            Text("⌘↩ 翻译")
+                .font(.system(size: 9))
+                .foregroundStyle(.quaternary)
 
             Button {
                 model.translate()
@@ -306,45 +350,13 @@ struct PopupView: View {
                 Text("翻译结果会显示在这里")
                     .font(.system(size: 12))
                     .foregroundStyle(.tertiary)
+                Text("选中文本按 ⌥D，或输入后按 ⌘↩")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.quaternary)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.vertical, 24)
-    }
-
-    private var footer: some View {
-        HStack(spacing: 10) {
-            Button {
-                model.copyOutput()
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: model.didCopy ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text(model.didCopy ? "已复制" : "复制")
-                }
-                .font(.system(size: 11))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(model.primaryText.isEmpty ? Color.secondary.opacity(0.45) : Color.secondary)
-            .disabled(model.primaryText.isEmpty)
-            .help("复制译文")
-
-            Spacer()
-
-            Text("⌘↩ 翻译 · Esc 关闭")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-
-            Button("关闭") {
-                onClose()
-            }
-            .buttonStyle(.plain)
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-        }
-        .padding(.leading, 16)
-        .padding(.trailing, 28)
-        .padding(.vertical, 9)
     }
 
     private var resizeGrip: some View {

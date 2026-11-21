@@ -1,4 +1,4 @@
-// 截图 OCR：调用系统 screencapture 交互选区，再用 Vision 识别中英文；不处理翻译。
+// 区域 OCR：按指定屏幕坐标截图，再用 Vision 识别中英文；不处理选区界面和翻译。
 import AppKit
 import CoreGraphics
 import Vision
@@ -29,15 +29,23 @@ enum OCREngine {
         _ = CGRequestScreenCaptureAccess()
     }
 
-    static func captureAndRecognize(completion: @escaping (Result<String, Error>) -> Void) {
+    static func capture(rect: CGRect, completion: @escaping (Result<String, Error>) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("lingolite-ocr-\(UUID().uuidString).png")
             defer { try? FileManager.default.removeItem(at: url) }
 
+            // 等遮罩完全消失，避免把选框画进截图。
+            usleep(120_000)
+
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-            process.arguments = ["-i", "-x", url.path]
+            process.arguments = [
+                "-x",
+                "-R",
+                "\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width)),\(Int(rect.height))",
+                url.path,
+            ]
             do {
                 try process.run()
             } catch {

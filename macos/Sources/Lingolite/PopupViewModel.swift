@@ -105,6 +105,16 @@ final class PopupViewModel: ObservableObject {
         isTranslating = false
     }
 
+    func clear() {
+        task?.cancel()
+        task = nil
+        sourceText = ""
+        results = []
+        errorMessage = nil
+        didCopy = false
+        isTranslating = false
+    }
+
     private func runLLM(text: String, config: AppConfig, apiKey: String) async {
         do {
             _ = try await service.translate(

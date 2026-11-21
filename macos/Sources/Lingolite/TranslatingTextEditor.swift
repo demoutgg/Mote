@@ -4,6 +4,7 @@ import SwiftUI
 
 struct TranslatingTextEditor: NSViewRepresentable {
     @Binding var text: String
+    var placeholder: String
     var focusToken: Int
     var onSubmit: () -> Void
 
@@ -12,15 +13,29 @@ struct TranslatingTextEditor: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSTextView.scrollableTextView()
+        let scrollView = NSScrollView()
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
+        scrollView.contentView.drawsBackground = false
 
-        guard let textView = scrollView.documentView as? NSTextView else {
-            return scrollView
-        }
+        let textView = PlaceholderTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 84))
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.containerSize = NSSize(
+            width: 0,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        textView.textContainer?.widthTracksTextView = true
+        textView.placeholder = placeholder
+        scrollView.documentView = textView
 
         textView.delegate = context.coordinator
         textView.isRichText = false
@@ -43,11 +58,13 @@ struct TranslatingTextEditor: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        guard let textView = scrollView.documentView as? NSTextView else { return }
+        guard let textView = scrollView.documentView as? PlaceholderTextView else { return }
         context.coordinator.parent = self
+        textView.placeholder = placeholder
 
         if textView.string != text {
             textView.string = text
+            textView.needsDisplay = true
         }
 
         if context.coordinator.lastFocusToken != focusToken {
@@ -88,5 +105,43 @@ struct TranslatingTextEditor: NSViewRepresentable {
             parent.onSubmit()
             return true
         }
+    }
+}
+
+private final class PlaceholderTextView: NSTextView {
+    var placeholder = ""
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        guard string.isEmpty else { return }
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font ?? NSFont.systemFont(ofSize: 13),
+            .foregroundColor: NSColor.tertiaryLabelColor,
+        ]
+        let padding = textContainerInset
+        let rect = NSRect(
+            x: padding.width + 4,
+            y: padding.height,
+            width: max(bounds.width - padding.width * 2 - 8, 0),
+            height: max(bounds.height - padding.height * 2, 0)
+        )
+        (placeholder as NSString).draw(in: rect, withAttributes: attributes)
+    }
+
+    override func didChangeText() {
+        super.didChangeText()
+        needsDisplay = true
+    }
+
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        needsDisplay = true
+    }
+
+    override func unmarkText() {
+        super.unmarkText()
+        needsDisplay = true
     }
 }

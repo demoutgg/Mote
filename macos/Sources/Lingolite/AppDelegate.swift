@@ -10,9 +10,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindowController: SettingsWindowController?
     private var onboardingWindowController: OnboardingWindowController?
     private var cancellables = Set<AnyCancellable>()
+    private var isReadingSelection = false
 
     private let settingsStore = SettingsStore()
     private let translationService = TranslationService()
+    private let screenshotSelector = ScreenshotSelector()
+    private let toastController = ToastController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
@@ -47,13 +50,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             center.register(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(optionKey), id: 3) { [weak self] in
                 self?.translateClipboard()
             },
+            center.register(keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(optionKey), id: 4) { [weak self] in
+                self?.captureAndTranslate()
+            },
+            center.register(
+                keyCode: UInt32(kVK_ANSI_S),
+                modifiers: UInt32(optionKey) | UInt32(shiftKey),
+                id: 5
+            ) { [weak self] in
+                self?.captureOCR()
+            },
         ]
         if registered.contains(false) {
             NSLog("Lingolite: failed to register one or more global hotkeys")
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 let alert = NSAlert()
                 alert.messageText = "快捷键被占用"
-                alert.informativeText = "⌥A / ⌥D / ⌥V 中有组合键已被其他应用注册。请退出冲突的应用（例如 Bob、MoePeek）后重新启动 Lingolite。"
+                alert.informativeText = "⌥A / ⌥D / ⌥V / ⌥S / ⇧⌥S 中有组合键已被其他应用注册。请退出冲突的应用（例如 Bob、MoePeek）后重新启动 Lingolite。"
                 alert.addButton(withTitle: "知道了")
                 alert.runModal()
             }
@@ -73,11 +86,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         menu.addItem(menuItem(title: "输入翻译", action: #selector(openManual), keyEquivalent: "a", modifiers: [.option]))
-        menu.addItem(menuItem(title: "选中翻译（框选）", action: #selector(translateSelection), keyEquivalent: "d", modifiers: [.option]))
+        menu.addItem(menuItem(title: "选中翻译", action: #selector(translateSelection), keyEquivalent: "d", modifiers: [.option]))
         menu.addItem(menuItem(title: "剪贴翻译", action: #selector(translateClipboard), keyEquivalent: "v", modifiers: [.option]))
+        menu.addItem(menuItem(title: "截图翻译", action: #selector(captureAndTranslate), keyEquivalent: "s", modifiers: [.option]))
+        menu.addItem(menuItem(title: "截图 OCR（复制）", action: #selector(captureOCR), keyEquivalent: "s", modifiers: [.option, .shift]))
         menu.addItem(menuItem(title: "使用指南…", action: #selector(showOnboarding)))
         menu.addItem(.separator())
         menu.addItem(menuItem(title: "设置…", action: #selector(openSettings), keyEquivalent: ","))
+        menu.addItem(menuItem(title: "辅助功能权限…", action: #selector(openAccessibilitySettings)))
+        menu.addItem(menuItem(title: "屏幕录制权限…", action: #selector(openScreenRecordingSettings)))
         menu.addItem(.separator())
         menu.addItem(menuItem(title: "关于 Lingolite", action: #selector(showAbout)))
         menu.addItem(menuItem(title: "退出 Lingolite", action: #selector(quit), keyEquivalent: "q"))
@@ -156,26 +173,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func translateSelection() {
         guard let popupController else { return }
-        popupController.hide(restoreFocus: false)
+        if popupController.isVisible {
+            popupController.hide()
+            return
+        }
+        guard !isReadingSelection else { return }
 
+        if !SelectionReader.hasAccessibilityPermission {
+            SelectionReader.requestAccessibilityPermission()
+        }
+
+        isReadingSelection = true
+        SelectionReader.read { [weak self] text in
+            guard let self else { return }
+            self.isReadingSelection = false
+            if text.isEmpty {
+                if !SelectionReader.hasAccessibilityPermission {
+                    self.popupController?.showPlaceholder(
+                        message: "选中翻译需要“辅助功能”权限。请在系统设置中授权后重试 ⌥D。"
+                    )
+                } else {
+                    self.popupController?.show(sourceText: "")
+                }
+            } else {
+                self.popupController?.show(sourceText: text)
+            }
+        }
+    }
+
+    @objc private func captureAndTranslate() {
+        popupController?.hide(restoreFocus: false)
+        beginScreenshot { text in
+            self.popupController?.show(sourceText: text)
+        } onError: { message in
+            self.popupController?.showPlaceholder(message: message)
+        }
+    }
+
+    @objc private func captureOCR() {
+        popupController?.hide(restoreFocus: false)
+        beginScreenshot { [weak self] text in
+            guard let self else { return }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+            self.toastController.show("已复制 \(text.count) 个字符")
+        } onError: { [weak self] message in
+            self?.toastController.show(message)
+        }
+    }
+
+    private func beginScreenshot(
+        onText: @escaping (String) -> Void,
+        onError: @escaping (String) -> Void
+    ) {
         guard OCREngine.hasScreenPermission else {
             OCREngine.requestScreenPermission()
-            popupController.showPlaceholder(
-                message: "框选翻译需要“屏幕录制”权限。请在系统设置中授权；如果授权后仍提示，请重启 Lingolite 再试。"
-            )
+            onError("截图功能需要“屏幕录制”权限。请在系统设置中授权；如果授权后仍提示，请重启 Lingolite 再试。")
             return
         }
 
-        OCREngine.captureAndRecognize { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case let .success(text):
-                self.popupController?.show(sourceText: text)
-            case let .failure(error):
-                if let ocrError = error as? OCREngine.OCRError, case .cancelled = ocrError {
-                    return
+        screenshotSelector.start { rect in
+            guard let rect else { return }
+            OCREngine.capture(rect: rect) { result in
+                switch result {
+                case let .success(text):
+                    onText(text)
+                case let .failure(error):
+                    if let ocrError = error as? OCREngine.OCRError, case .cancelled = ocrError {
+                        return
+                    }
+                    onError(error.localizedDescription)
                 }
-                self.popupController?.showPlaceholder(message: error.localizedDescription)
             }
         }
     }
@@ -203,6 +272,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindowController?.show()
     }
 
+    @objc private func openAccessibilitySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func openScreenRecordingSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
     @objc private func showOnboarding() {
         onboardingWindowController?.show()
     }
@@ -213,7 +296,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .applicationName: "Lingolite",
             .applicationVersion: version,
             .credits: NSAttributedString(
-                string: "轻量、原生的 AI 划词翻译工具\n选中文本，按 ⌥L 即可翻译。",
+                string: "轻量、原生的 AI 翻译工具\n⌥D 选中翻译 · ⌥S 截图翻译 · ⇧⌥S 截图 OCR",
                 attributes: [.font: NSFont.systemFont(ofSize: 11)]
             ),
         ])

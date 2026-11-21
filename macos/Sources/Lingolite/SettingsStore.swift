@@ -34,6 +34,8 @@ struct AppConfig: Codable, Equatable {
     var llmEnabled = true
     var baiduEnabled = false
     var baiduAppID = ""
+    var popupWidth = 520.0
+    var popupHeight = 420.0
     var systemPrompt = defaultPrompt
 
     enum CodingKeys: String, CodingKey {
@@ -46,6 +48,8 @@ struct AppConfig: Codable, Equatable {
         case llmEnabled
         case baiduEnabled
         case baiduAppID
+        case popupWidth
+        case popupHeight
         case systemPrompt
     }
 
@@ -64,6 +68,8 @@ struct AppConfig: Codable, Equatable {
         llmEnabled = try container.decodeIfPresent(Bool.self, forKey: .llmEnabled) ?? true
         baiduEnabled = try container.decodeIfPresent(Bool.self, forKey: .baiduEnabled) ?? false
         baiduAppID = try container.decodeIfPresent(String.self, forKey: .baiduAppID) ?? ""
+        popupWidth = try container.decodeIfPresent(Double.self, forKey: .popupWidth) ?? 520
+        popupHeight = try container.decodeIfPresent(Double.self, forKey: .popupHeight) ?? 420
         systemPrompt = try container.decodeIfPresent(String.self, forKey: .systemPrompt) ?? Self.defaultPrompt
     }
 
@@ -144,6 +150,8 @@ final class SettingsStore: ObservableObject {
         config.model = config.model.trimmingCharacters(in: .whitespacesAndNewlines)
         config.baiduAppID = config.baiduAppID.trimmingCharacters(in: .whitespacesAndNewlines)
         config.statusIcon = config.statusIcon.trimmingCharacters(in: .whitespacesAndNewlines)
+        config.popupWidth = min(max(config.popupWidth, 460), 900)
+        config.popupHeight = min(max(config.popupHeight, 340), 800)
         config.targetLanguage = config.targetLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
         if config.targetLanguage.isEmpty {
             config.targetLanguage = AppConfig.defaultTargetLanguage
