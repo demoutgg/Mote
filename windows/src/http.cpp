@@ -443,6 +443,8 @@ bool TranslateBaidu(
     std::wstring& output,
     std::wstring& error
 ) {
+    using namespace winrt::Windows::Data::Json;
+
     if (!config.baiduEnabled) {
         error = L"百度翻译未启用。";
         return false;
