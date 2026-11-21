@@ -8,6 +8,7 @@ swift build -c release
 app="dist/Lingolite.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp ".build/release/Lingolite" "$app/Contents/MacOS/Lingolite"
+cp ".build/release/LingoliteOCR" "$app/Contents/MacOS/LingoliteOCR"
 cp "Resources/Info.plist" "$app/Contents/Info.plist"
 cp "Resources/AppIcon.icns" "$app/Contents/Resources/AppIcon.icns"
 codesign --force --deep --sign - "$app"

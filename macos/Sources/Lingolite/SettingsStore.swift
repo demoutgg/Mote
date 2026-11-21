@@ -8,6 +8,8 @@ struct AppConfig: Codable, Equatable {
     static let autoTargetLanguage = "自动（中英互译）"
     static let targetLanguages = [autoTargetLanguage, "简体中文", "繁體中文", "English", "日本語", "한국어"]
     static let statusIcons = [
+        "sparkles",
+        "sparkle",
         "character.bubble.fill",
         "text.bubble.fill",
         "quote.bubble.fill",

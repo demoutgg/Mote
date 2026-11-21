@@ -21,6 +21,14 @@ let package = Package(
                 .linkedFramework("ApplicationServices"),
             ]
         ),
+        .executableTarget(
+            name: "LingoliteOCR",
+            path: "Sources/LingoliteOCR",
+            linkerSettings: [
+                .linkedFramework("Vision"),
+                .linkedFramework("ImageIO"),
+            ]
+        ),
     ]
 )
 
