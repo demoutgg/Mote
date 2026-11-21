@@ -163,6 +163,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if name.isEmpty {
             button.image = nil
             button.title = "译"
+        } else if name == "sparkles" {
+            button.image = Self.sparklesTemplateImage()
+            button.title = ""
         } else if let image = NSImage(systemSymbolName: name, accessibilityDescription: "Lingolite") {
             image.isTemplate = true
             button.image = image
@@ -172,6 +175,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.title = "译"
         }
         button.toolTip = "Lingolite · 选中文本按 ⌥D 翻译"
+    }
+
+    private static func sparklesTemplateImage() -> NSImage {
+        let size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.black.setFill()
+
+        fillStar(center: NSPoint(x: 11.4, y: 6.6), radius: 6.2, innerRadius: 1.0)
+        fillStar(center: NSPoint(x: 5.4, y: 12.4), radius: 3.0, innerRadius: 0.55)
+        fillStar(center: NSPoint(x: 9.4, y: 15.3), radius: 1.9, innerRadius: 0.4)
+
+        image.unlockFocus()
+        image.isTemplate = true
+        return image
+    }
+
+    private static func fillStar(center: NSPoint, radius: CGFloat, innerRadius: CGFloat) {
+        let path = NSBezierPath()
+        for index in 0..<8 {
+            let angle = CGFloat(index) * .pi / 4 - .pi / 2
+            let r = index.isMultiple(of: 2) ? radius : innerRadius
+            let point = NSPoint(
+                x: center.x + cos(angle) * r,
+                y: center.y + sin(angle) * r
+            )
+            if index == 0 {
+                path.move(to: point)
+            } else {
+                path.line(to: point)
+            }
+        }
+        path.close()
+        path.fill()
     }
 
     private func setupMainMenu() {

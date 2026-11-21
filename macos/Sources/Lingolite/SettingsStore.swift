@@ -32,7 +32,7 @@ struct AppConfig: Codable, Equatable {
     var targetLanguage = defaultTargetLanguage
     var temperature = 0.2
     var autoCopy = false
-    var statusIcon = "character.bubble.fill"
+    var statusIcon = "sparkles"
     var llmEnabled = true
     var baiduEnabled = false
     var baiduAppID = ""
@@ -68,7 +68,7 @@ struct AppConfig: Codable, Equatable {
         temperature = try container.decodeIfPresent(Double.self, forKey: .temperature) ?? 0.2
         autoCopy = try container.decodeIfPresent(Bool.self, forKey: .autoCopy) ?? false
         statusIcon = try container.decodeIfPresent(String.self, forKey: .statusIcon)
-            ?? Self.statusIcons[0]
+            ?? "sparkles"
         llmEnabled = try container.decodeIfPresent(Bool.self, forKey: .llmEnabled) ?? true
         baiduEnabled = try container.decodeIfPresent(Bool.self, forKey: .baiduEnabled) ?? false
         baiduAppID = try container.decodeIfPresent(String.self, forKey: .baiduAppID) ?? ""

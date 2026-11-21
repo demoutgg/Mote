@@ -310,10 +310,13 @@ struct SettingsView: View {
                             Button {
                                 draft.statusIcon = icon
                             } label: {
-                                if draft.statusIcon == icon {
-                                    Label(icon, systemImage: "checkmark")
-                                } else {
-                                    Text(icon)
+                                HStack(spacing: 6) {
+                                    Image(systemName: icon)
+                                        .frame(width: 16)
+                                    Text(statusIconName(icon))
+                                    if draft.statusIcon == icon {
+                                        Image(systemName: "checkmark")
+                                    }
                                 }
                             }
                         }
@@ -457,6 +460,17 @@ struct SettingsView: View {
             Text("译")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private func statusIconName(_ icon: String) -> String {
+        switch icon {
+        case "sparkles":
+            return "星光（双星）"
+        case "sparkle":
+            return "星光（单星）"
+        default:
+            return icon
         }
     }
 
