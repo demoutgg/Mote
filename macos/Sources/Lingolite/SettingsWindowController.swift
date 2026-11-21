@@ -14,7 +14,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     func show() {
         if let window {
             window.makeKeyAndOrderFront(nil)
-            AppActivation.activate(NSApp)
+            window.orderFrontRegardless()
+            AppActivation.activate(window)
             return
         }
 
@@ -22,23 +23,25 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             self?.window?.close()
         }
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 640),
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 620),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Lingolite Settings"
+        window.title = "Lingolite 设置"
         window.contentView = NSHostingView(rootView: settingsView)
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
         self.window = window
         window.makeKeyAndOrderFront(nil)
-        AppActivation.activate(NSApp)
+        window.orderFrontRegardless()
+        AppActivation.activate(window)
     }
 
     func windowWillClose(_ notification: Notification) {
         window = nil
+        AppActivation.restoreAccessoryPolicy()
     }
 }
 

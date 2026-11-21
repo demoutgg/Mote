@@ -1,19 +1,19 @@
 # Lingolite
 
-轻量、原生的跨平台 AI 划词翻译工具。选中文本，按快捷键，在鼠标附近得到流式翻译。
+轻量、原生的跨平台 AI 翻译工具。输入文本或框选屏幕区域，按快捷键得到流式翻译。
 
 ## 状态
 
-v0.1 开发中。macOS 优先，Windows 随后跟进。
+v0.3.0。macOS 已支持输入、框选 OCR、剪贴板翻译，可同时启用 AI 与百度翻译；Windows 仍在骨架阶段。
 
 ## 目标
 
 - 原生实现，不用 Electron
-- 自己填 API Key，兼容 OpenAI Chat Completions 接口
+- 自己填 Key，兼容 OpenAI Chat Completions 与百度翻译
 - 默认本地存储，不上传历史，不收集遥测
 - macOS：菜单栏应用，无 Dock 图标
 - Windows：托盘应用，无主窗口常驻
-- 后续支持截图 OCR（v0.2）
+- 多服务并行，分别开关
 
 ## 技术栈
 
@@ -33,29 +33,38 @@ cd macos
 ./scripts/build-app.sh && open dist/Lingolite.app
 ```
 
-首次使用需要在“系统设置 → 隐私与安全性 → 辅助功能”中授权 Lingolite，否则划词捕获会回退到模拟复制。
+框选翻译首次使用需要在“系统设置 → 隐私与安全性 → 屏幕录制”中授权 Lingolite。
 
-默认快捷键：`⌥L`（Option + L）。
+快捷键：
 
-说明：本地构建使用 ad-hoc 签名，重新编译后系统会把它当成新应用，可能需要重新勾选辅助功能权限。正式分发前会换成 Developer ID 签名。
+| 功能 | 快捷键 | 说明 |
+| --- | --- | --- |
+| 输入翻译 | `⌥A` | 打开空弹窗手动输入 |
+| 选中翻译 | `⌥D` | 框选屏幕区域，OCR 后翻译 |
+| 剪贴翻译 | `⌥V` | 翻译剪贴板中的文本 |
+
+弹窗内 Enter 翻译，`⌘Enter` 换行。窗口位置和大小会记住，右下角可拖动缩放。
+
+说明：本地构建使用 ad-hoc 签名，重新编译后系统会把它当成新应用，可能需要重新勾选屏幕录制权限。正式分发前会换成 Developer ID 签名。
 
 ## 配置
 
-菜单栏图标 → Settings：
+菜单栏图标 → 设置：
 
-- Endpoint：支持完整 `/v1/chat/completions` 地址，也支持只填 base URL
-- API Key：macOS Keychain / Windows Credential Manager
-- Model：例如 `gpt-4o-mini`、`deepseek-chat`、`qwen-plus`
-- Target language 与 System prompt
+- AI 翻译：填 Endpoint、API Key、模型，支持获取模型列表和测试连接
+- 百度翻译：填 AppID 与密钥，可单独启用或关闭
+- 两个服务可以同时启用，弹窗会并列显示各自结果
+- 菜单栏图标：内置多种 SF Symbols，也可以填自定义名称，留空显示“译”
 
 API Key 不写入 JSON，也不会出现在导出的配置里。
 
-设置页提供 OpenAI、DeepSeek、Ollama、LM Studio 的快速填充，以及直接测试连通性的按钮。
+AI 服务提供 OpenAI、DeepSeek、Ollama、LM Studio 的快速填充；百度密钥与 AI Key 都保存在 macOS 钥匙串。
 
 ## Roadmap
 
 - v0.1：macOS 划词翻译、手动输入、Keychain、流式输出
-- v0.2：macOS 截图 OCR、历史记录、快捷键设置
+- v0.2：截图 OCR、语言切换、中文界面、首次引导
+- v0.3：AI + 百度双服务并行、模型列表、自定义菜单栏图标、窗口记忆与缩放
 - v0.3：Windows beta（托盘、热键、UIA 划词、WinRT OCR）
 - v1.0：双端稳定版、签名分发、自动更新
 

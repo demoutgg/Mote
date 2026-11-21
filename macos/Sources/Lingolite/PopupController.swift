@@ -8,20 +8,25 @@ final class LingolitePanel: NSPanel {
 }
 
 final class PopupController {
-    static let size = NSSize(width: 480, height: 340)
+    static let size = NSSize(width: 520, height: 440)
 
     private let panel: LingolitePanel
     private let model: PopupViewModel
     private var escapeMonitor: Any?
     private var resignObserver: NSObjectProtocol?
     private var previousApplication: NSRunningApplication?
+    private var resizeStartFrame: NSRect?
+    private var forcedRegularPolicy = false
     private(set) var isVisible = false
+    var onOpenSettings: (() -> Void)?
+
+    private static let autosaveName = "LingolitePopupFrame"
 
     init(store: SettingsStore, service: TranslationService) {
         model = PopupViewModel(store: store, service: service)
         panel = LingolitePanel(
             contentRect: NSRect(origin: .zero, size: Self.size),
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.borderless, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -34,10 +39,18 @@ final class PopupController {
         panel.hasShadow = true
         panel.isMovableByWindowBackground = true
         panel.animationBehavior = .utilityWindow
+        panel.minSize = NSSize(width: 460, height: 360)
+        panel.maxSize = NSSize(width: 900, height: 800)
+        panel.setFrameAutosaveName(Self.autosaveName)
 
-        let view = PopupView(model: model, store: store) { [weak self] in
-            self?.hide()
-        }
+        let view = PopupView(
+            model: model,
+            store: store,
+            onClose: { [weak self] in self?.hide() },
+            onOpenSettings: { [weak self] in self?.onOpenSettings?() },
+            onResize: { [weak self] translation in self?.resize(by: translation) },
+            onResizeEnd: { [weak self] in self?.resizeStartFrame = nil }
+        )
         panel.contentView = NSHostingView(rootView: view)
 
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -70,19 +83,22 @@ final class PopupController {
     func show(sourceText: String) {
         previousApplication = NSWorkspace.shared.frontmostApplication
         model.sourceText = sourceText
-        model.output = ""
+        model.results = []
         model.errorMessage = nil
+        model.didCopy = false
+        model.focusToken += 1
         isVisible = true
-        positionNearMouse()
-
-        AppActivation.activate(NSApp)
-        panel.makeKeyAndOrderFront(nil)
-
-        if sourceText.isEmpty {
-            if !SelectionReader.hasAccessibilityPermission {
-                model.errorMessage = "没有拿到选中文本。请先授予“辅助功能”权限，或直接在上方输入。"
-            }
+        if hasSavedFrame {
+            clampToVisibleScreen()
         } else {
+            positionNearMouse()
+        }
+
+        panel.makeKeyAndOrderFront(nil)
+        panel.makeKey()
+        activateAppIfNeeded()
+
+        if !sourceText.isEmpty {
             model.translate()
         }
     }
@@ -99,6 +115,62 @@ final class PopupController {
             AppActivation.activate(previousApplication)
         }
         previousApplication = nil
+
+        if forcedRegularPolicy {
+            NSApp.setActivationPolicy(.accessory)
+            forcedRegularPolicy = false
+        }
+    }
+
+    func showPlaceholder(message: String) {
+        show(sourceText: "")
+        model.errorMessage = message
+    }
+
+    func resize(by translation: CGSize) {
+        if resizeStartFrame == nil {
+            resizeStartFrame = panel.frame
+        }
+        guard let start = resizeStartFrame else { return }
+
+        let width = min(max(start.width + translation.width, 460), 900)
+        let height = min(max(start.height - translation.height, 360), 800)
+        var frame = start
+        frame.origin.y = start.maxY - height
+        frame.size = NSSize(width: width, height: height)
+        panel.setFrame(frame, display: true)
+    }
+
+    private var hasSavedFrame: Bool {
+        UserDefaults.standard.string(forKey: "NSWindow Frame \(Self.autosaveName)") != nil
+    }
+
+    private func activateAppIfNeeded() {
+        AppActivation.activate(NSApp)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+            guard let self, self.isVisible, !NSApp.isActive else { return }
+            NSApp.setActivationPolicy(.regular)
+            self.forcedRegularPolicy = true
+            AppActivation.activate(NSApp)
+            self.panel.makeKeyAndOrderFront(nil)
+            self.panel.makeKey()
+        }
+    }
+
+    private func clampToVisibleScreen() {
+        let frame = panel.frame
+        let screen = NSScreen.screens.first { $0.visibleFrame.intersects(frame) } ?? NSScreen.main
+        guard let visible = screen?.visibleFrame else { return }
+
+        var clamped = frame
+        clamped.size.width = min(max(clamped.width, 460), visible.width)
+        clamped.size.height = min(max(clamped.height, 360), visible.height)
+        clamped.origin.x = min(max(clamped.minX, visible.minX), visible.maxX - clamped.width)
+        clamped.origin.y = min(max(clamped.minY, visible.minY), visible.maxY - clamped.height)
+        if clamped != frame {
+            panel.setFrame(clamped, display: false)
+        }
     }
 
     private func positionNearMouse() {

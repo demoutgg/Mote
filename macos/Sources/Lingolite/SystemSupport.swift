@@ -3,18 +3,26 @@ import AppKit
 
 enum AppActivation {
     static func activate(_ application: NSApplication) {
-        if #available(macOS 14.0, *) {
-            application.activate()
-        } else {
-            application.activate(ignoringOtherApps: true)
-        }
+        application.activate(ignoringOtherApps: true)
     }
 
     static func activate(_ application: NSRunningApplication) {
-        if #available(macOS 14.0, *) {
-            _ = application.activate()
-        } else {
-            _ = application.activate(options: [])
+        _ = application.activate(options: [.activateIgnoringOtherApps])
+    }
+
+    /// 普通窗口先直接激活；被系统拒绝时临时切到 regular 策略，保证窗口能接收输入。
+    static func activate(_ window: NSWindow) {
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            guard !NSApp.isActive else { return }
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            window.makeKey()
         }
+    }
+
+    static func restoreAccessoryPolicy() {
+        NSApp.setActivationPolicy(.accessory)
     }
 }

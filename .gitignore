@@ -1,6 +1,7 @@
 .DS_Store
 .build/
 dist/
+macos/Resources/AppIcon.iconset/
 DerivedData/
 *.xcuserstate
 windows/build/

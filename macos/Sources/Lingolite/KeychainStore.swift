@@ -3,9 +3,8 @@ import Security
 
 enum KeychainStore {
     private static let service = "com.demoutgg.lingolite"
-    private static let account = "api-key"
 
-    static func read() -> String? {
+    static func read(account: String = "api-key") -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -20,7 +19,7 @@ enum KeychainStore {
         return String(data: data, encoding: .utf8)
     }
 
-    static func save(_ value: String) {
+    static func save(_ value: String, account: String = "api-key") {
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
