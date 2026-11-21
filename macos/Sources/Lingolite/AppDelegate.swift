@@ -150,7 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             let alert = NSAlert()
             alert.messageText = "快捷键被占用"
-            alert.informativeText = "\(list) 已被其他应用注册。请在设置中改成其他组合，或退出冲突的应用（例如 Bob、MoePeek）。"
+            alert.informativeText = "\(list) 已被其他应用注册。请在设置中改成其他组合，或关闭占用该快捷键的应用。"
             alert.addButton(withTitle: "知道了")
             alert.runModal()
         }

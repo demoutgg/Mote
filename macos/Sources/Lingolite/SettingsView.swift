@@ -283,7 +283,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Text("选中翻译需要辅助功能权限；截图功能需要屏幕录制权限。若快捷键被 Bob、MoePeek 等应用占用，需要先关闭对方的同名快捷键。")
+                Text("选中翻译需要辅助功能权限；截图功能需要屏幕录制权限。快捷键被占用时，点击右侧按键重新录制即可。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
