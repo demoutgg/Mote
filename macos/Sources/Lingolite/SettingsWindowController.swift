@@ -4,11 +4,13 @@ import SwiftUI
 
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let store: SettingsStore
+    private let history: HistoryStore
     private var window: NSWindow?
     var onStatusIconPreview: ((String) -> Void)?
 
-    init(store: SettingsStore) {
+    init(store: SettingsStore, history: HistoryStore) {
         self.store = store
+        self.history = history
         super.init()
     }
 
@@ -22,6 +24,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let settingsView = SettingsView(
             store: store,
+            history: history,
             onStatusIconPreview: { [weak self] name in
                 self?.onStatusIconPreview?(name)
             },

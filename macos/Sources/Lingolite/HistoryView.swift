@@ -4,7 +4,8 @@ import SwiftUI
 
 struct HistoryView: View {
     @ObservedObject var store: HistoryStore
-    var onClose: () -> Void
+    var isEmbedded = false
+    var onClose: () -> Void = {}
 
     @State private var query = ""
     @State private var showClearConfirmation = false
@@ -12,8 +13,10 @@ struct HistoryView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text("历史记录")
-                    .font(.system(size: 15, weight: .semibold))
+                if !isEmbedded {
+                    Text("历史记录")
+                        .font(.system(size: 15, weight: .semibold))
+                }
                 Text("最近 100 条")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
@@ -22,8 +25,10 @@ struct HistoryView: View {
                     showClearConfirmation = true
                 }
                 .disabled(store.entries.isEmpty)
-                Button("关闭") {
-                    onClose()
+                if !isEmbedded {
+                    Button("关闭") {
+                        onClose()
+                    }
                 }
             }
             .padding(14)
@@ -53,7 +58,7 @@ struct HistoryView: View {
                 .listStyle(.inset)
             }
         }
-        .frame(minWidth: 560, minHeight: 440)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .confirmationDialog("清空全部历史记录？", isPresented: $showClearConfirmation) {
             Button("清空", role: .destructive) {
                 store.clear()

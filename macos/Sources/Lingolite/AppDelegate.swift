@@ -34,7 +34,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             service: translationService,
             history: historyStore
         )
-        settingsWindowController = SettingsWindowController(store: settingsStore)
+        settingsWindowController = SettingsWindowController(
+            store: settingsStore,
+            history: historyStore
+        )
         historyWindowController = HistoryWindowController(store: historyStore)
         settingsWindowController?.onStatusIconPreview = { [weak self] name in
             self?.applyStatusIcon(name)

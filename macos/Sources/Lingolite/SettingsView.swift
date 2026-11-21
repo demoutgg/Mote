@@ -5,6 +5,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var store: SettingsStore
+    @ObservedObject var history: HistoryStore
     var onStatusIconPreview: (String) -> Void
     var onClose: () -> Void
 
@@ -25,10 +26,12 @@ struct SettingsView: View {
 
     init(
         store: SettingsStore,
+        history: HistoryStore,
         onStatusIconPreview: @escaping (String) -> Void,
         onClose: @escaping () -> Void
     ) {
         self.store = store
+        self.history = history
         self.onStatusIconPreview = onStatusIconPreview
         self.onClose = onClose
         _draft = State(initialValue: store.config)
@@ -45,6 +48,8 @@ struct SettingsView: View {
                     .tabItem { Label("服务", systemImage: "square.stack.3d.up") }
                 translationTab
                     .tabItem { Label("翻译", systemImage: "character.bubble") }
+                HistoryView(store: history, isEmbedded: true)
+                    .tabItem { Label("历史", systemImage: "clock.arrow.circlepath") }
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
