@@ -30,6 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         popupController = PopupController(store: settingsStore, service: translationService)
         settingsWindowController = SettingsWindowController(store: settingsStore)
+        settingsWindowController?.onStatusIconPreview = { [weak self] name in
+            self?.applyStatusIcon(name)
+        }
         onboardingWindowController = OnboardingWindowController(
             store: settingsStore,
             onOpenSettings: { [weak self] in self?.settingsWindowController?.show() }
@@ -155,9 +158,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func applyStatusIcon() {
+    private func applyStatusIcon(_ override: String? = nil) {
         guard let button = statusItem?.button else { return }
-        let name = settingsStore.config.statusIcon
+        let name = (override ?? settingsStore.config.statusIcon)
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         if name.isEmpty {

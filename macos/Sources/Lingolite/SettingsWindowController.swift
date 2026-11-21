@@ -5,6 +5,7 @@ import SwiftUI
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let store: SettingsStore
     private var window: NSWindow?
+    var onStatusIconPreview: ((String) -> Void)?
 
     init(store: SettingsStore) {
         self.store = store
@@ -19,9 +20,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             return
         }
 
-        let settingsView = SettingsView(store: store) { [weak self] in
-            self?.window?.close()
-        }
+        let settingsView = SettingsView(
+            store: store,
+            onStatusIconPreview: { [weak self] name in
+                self?.onStatusIconPreview?(name)
+            },
+            onClose: { [weak self] in
+                self?.window?.close()
+            }
+        )
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 620),
             styleMask: [.titled, .closable, .miniaturizable],
@@ -41,6 +48,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         window = nil
+        onStatusIconPreview?(store.config.statusIcon)
         AppActivation.restoreAccessoryPolicy()
     }
 }

@@ -9,6 +9,7 @@ struct OnboardingView: View {
 
     @State private var axGranted = SelectionReader.hasAccessibilityPermission
     @State private var screenGranted = OCREngine.hasScreenPermission
+    private let permissionTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,7 +33,7 @@ struct OnboardingView: View {
                 step(
                     number: 1,
                     title: "授予必要权限",
-                    detail: "选中翻译需要辅助功能；截图翻译需要屏幕录制。",
+                    detail: "选中翻译需要辅助功能；截图翻译需要屏幕录制，授权后可能需要重启 Lingolite。",
                     status: axGranted && screenGranted ? "已完成" : "待授权",
                     statusColor: axGranted && screenGranted ? .green : .orange
                 ) {
@@ -53,6 +54,11 @@ struct OnboardingView: View {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
                         }
+                        Button("重新检查") {
+                            refreshPermissions()
+                        }
+                        .buttonStyle(.link)
+                        .font(.system(size: 10))
                     }
                 }
 
@@ -97,10 +103,17 @@ struct OnboardingView: View {
         }
         .frame(width: 540, height: 560)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            axGranted = SelectionReader.hasAccessibilityPermission
-            screenGranted = OCREngine.hasScreenPermission
+        .onReceive(permissionTimer) { _ in
+            refreshPermissions()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshPermissions()
+        }
+    }
+
+    private func refreshPermissions() {
+        axGranted = SelectionReader.hasAccessibilityPermission
+        screenGranted = OCREngine.hasScreenPermission
     }
 
     private func step<Accessory: View>(

@@ -5,6 +5,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var store: SettingsStore
+    var onStatusIconPreview: (String) -> Void
     var onClose: () -> Void
 
     @State private var draft: AppConfig
@@ -22,8 +23,13 @@ struct SettingsView: View {
 
     private let service = TranslationService()
 
-    init(store: SettingsStore, onClose: @escaping () -> Void) {
+    init(
+        store: SettingsStore,
+        onStatusIconPreview: @escaping (String) -> Void,
+        onClose: @escaping () -> Void
+    ) {
         self.store = store
+        self.onStatusIconPreview = onStatusIconPreview
         self.onClose = onClose
         _draft = State(initialValue: store.config)
         _draftKey = State(initialValue: store.apiKey)
@@ -58,6 +64,7 @@ struct SettingsView: View {
                 }
                 Spacer()
                 Button("取消") {
+                    onStatusIconPreview(store.config.statusIcon)
                     onClose()
                 }
                 Button("保存") {
@@ -309,6 +316,7 @@ struct SettingsView: View {
                         ForEach(AppConfig.statusIcons, id: \.self) { icon in
                             Button {
                                 draft.statusIcon = icon
+                                onStatusIconPreview(icon)
                             } label: {
                                 HStack(spacing: 6) {
                                     Image(systemName: icon)
@@ -323,6 +331,7 @@ struct SettingsView: View {
                         Divider()
                         Button("显示“译”字") {
                             draft.statusIcon = ""
+                            onStatusIconPreview("")
                         }
                     }
                     .fixedSize()
@@ -333,6 +342,9 @@ struct SettingsView: View {
                     text: $draft.statusIcon,
                     prompt: Text("character.bubble.fill")
                 )
+                .onChange(of: draft.statusIcon) { value in
+                    onStatusIconPreview(value)
+                }
 
                 Text("留空显示“译”字；支持任意 SF Symbols 名称。")
                     .font(.caption)
@@ -361,6 +373,7 @@ struct SettingsView: View {
         store.apiKey = draftKey
         store.baiduKey = draftBaiduKey
         store.save()
+        onStatusIconPreview(draft.statusIcon)
         onClose()
     }
 
