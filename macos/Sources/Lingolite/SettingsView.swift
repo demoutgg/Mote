@@ -77,22 +77,18 @@ struct SettingsView: View {
                 if draft.llmEnabled {
                     HStack {
                         TextField("接口地址", text: $draft.endpoint, prompt: Text("https://api.openai.com/v1"))
-                        Menu("常用服务") {
-                            Button("OpenAI") {
-                                draft.endpoint = "https://api.openai.com/v1"
-                                draft.model = "gpt-4o-mini"
-                            }
-                            Button("DeepSeek") {
-                                draft.endpoint = "https://api.deepseek.com/v1"
-                                draft.model = "deepseek-chat"
-                            }
-                            Button("Ollama（本地）") {
-                                draft.endpoint = "http://127.0.0.1:11434/v1"
-                                draft.model = "qwen2.5:7b"
-                            }
-                            Button("LM Studio（本地）") {
-                                draft.endpoint = "http://127.0.0.1:1234/v1"
-                                draft.model = "local-model"
+                        Menu(currentPreset?.rawValue ?? "自定义") {
+                            ForEach(ServicePreset.allCases, id: \.self) { preset in
+                                Button {
+                                    draft.endpoint = preset.endpoint
+                                    draft.model = preset.model
+                                } label: {
+                                    if currentPreset == preset {
+                                        Label(preset.rawValue, systemImage: "checkmark")
+                                    } else {
+                                        Text(preset.rawValue)
+                                    }
+                                }
                             }
                         }
                         .fixedSize()
@@ -310,6 +306,10 @@ struct SettingsView: View {
         onClose()
     }
 
+    private var currentPreset: ServicePreset? {
+        ServicePreset.detect(draft.endpoint)
+    }
+
     private func runTest() {
         isTesting = true
         testResult = nil
@@ -411,6 +411,56 @@ struct SettingsView: View {
             Text("译")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private enum ServicePreset: String, CaseIterable {
+        case openAI = "OpenAI"
+        case deepSeek = "DeepSeek"
+        case ollama = "Ollama（本地）"
+        case lmStudio = "LM Studio（本地）"
+
+        var endpoint: String {
+            switch self {
+            case .openAI:
+                return "https://api.openai.com/v1"
+            case .deepSeek:
+                return "https://api.deepseek.com/v1"
+            case .ollama:
+                return "http://127.0.0.1:11434/v1"
+            case .lmStudio:
+                return "http://127.0.0.1:1234/v1"
+            }
+        }
+
+        var model: String {
+            switch self {
+            case .openAI:
+                return "gpt-4o-mini"
+            case .deepSeek:
+                return "deepseek-chat"
+            case .ollama:
+                return "qwen2.5:7b"
+            case .lmStudio:
+                return "local-model"
+            }
+        }
+
+        static func detect(_ endpoint: String) -> ServicePreset? {
+            let lower = endpoint.lowercased()
+            if lower.contains("api.openai.com") {
+                return .openAI
+            }
+            if lower.contains("api.deepseek.com") {
+                return .deepSeek
+            }
+            if lower.contains("11434") {
+                return .ollama
+            }
+            if lower.contains("1234") {
+                return .lmStudio
+            }
+            return nil
         }
     }
 }
