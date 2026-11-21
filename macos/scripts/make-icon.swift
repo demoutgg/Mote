@@ -1,4 +1,4 @@
-// 生成 AppIcon.icns：渐变圆角底 + 白色“译”字，不依赖外部素材。
+// 生成 AppIcon.icns：深色科技风 + 小幽灵吉祥物 + sparkles，不依赖外部素材。
 import AppKit
 import CoreGraphics
 
@@ -9,6 +9,51 @@ let output = root.appendingPathComponent("Resources/AppIcon.icns")
 
 try? fileManager.removeItem(at: iconset)
 try fileManager.createDirectory(at: iconset, withIntermediateDirectories: true)
+
+let backgroundTop = NSColor(srgbRed: 0.035, green: 0.055, blue: 0.14, alpha: 1)
+let backgroundBottom = NSColor(srgbRed: 0.09, green: 0.13, blue: 0.32, alpha: 1)
+let bodyColor = NSColor(srgbRed: 0.92, green: 0.96, blue: 1.0, alpha: 1)
+let rimColor = NSColor(srgbRed: 0.42, green: 0.72, blue: 1.0, alpha: 0.9)
+let inkColor = NSColor(srgbRed: 0.035, green: 0.06, blue: 0.16, alpha: 1)
+let neon = NSColor(srgbRed: 0.35, green: 0.78, blue: 1.0, alpha: 1)
+let blushColor = NSColor(srgbRed: 1.0, green: 0.44, blue: 0.76, alpha: 0.55)
+
+func starPath(center: CGPoint, outer: CGFloat, inner: CGFloat) -> CGPath {
+    let path = CGMutablePath()
+    for index in 0..<8 {
+        let angle = CGFloat(index) * .pi / 4 - .pi / 2
+        let radius = index.isMultiple(of: 2) ? outer : inner
+        let p = CGPoint(
+            x: center.x + cos(angle) * radius,
+            y: center.y + sin(angle) * radius
+        )
+        if index == 0 {
+            path.move(to: p)
+        } else {
+            path.addLine(to: p)
+        }
+    }
+    path.closeSubpath()
+    return path
+}
+
+func ghostPath(size: CGFloat) -> CGPath {
+    func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+        CGPoint(x: x * size, y: y * size)
+    }
+    let path = CGMutablePath()
+    path.move(to: p(0.21, 0.35))
+    path.addCurve(to: p(0.50, 0.83), control1: p(0.21, 0.69), control2: p(0.33, 0.83))
+    path.addCurve(to: p(0.79, 0.35), control1: p(0.67, 0.83), control2: p(0.79, 0.69))
+    path.addLine(to: p(0.79, 0.30))
+    path.addQuadCurve(to: p(0.675, 0.30), control: p(0.7325, 0.205))
+    path.addQuadCurve(to: p(0.56, 0.30), control: p(0.6175, 0.395))
+    path.addQuadCurve(to: p(0.445, 0.30), control: p(0.5025, 0.205))
+    path.addQuadCurve(to: p(0.33, 0.30), control: p(0.3875, 0.395))
+    path.addQuadCurve(to: p(0.21, 0.30), control: p(0.27, 0.205))
+    path.closeSubpath()
+    return path
+}
 
 func render(pixels: Int) -> NSImage {
     let size = CGFloat(pixels)
@@ -33,92 +78,161 @@ func render(pixels: Int) -> NSImage {
     context.addPath(shape)
     context.clip()
 
-    let colors = [
-        CGColor(srgbRed: 0.29, green: 0.48, blue: 1.00, alpha: 1),
-        CGColor(srgbRed: 0.55, green: 0.35, blue: 0.96, alpha: 1),
-    ] as CFArray
-    let gradient = CGGradient(
+    let background = CGGradient(
         colorsSpace: CGColorSpaceCreateDeviceRGB(),
-        colors: colors,
+        colors: [backgroundTop.cgColor, backgroundBottom.cgColor] as CFArray,
         locations: [0, 1]
     )!
     context.drawLinearGradient(
-        gradient,
+        background,
         start: CGPoint(x: rect.minX, y: rect.maxY),
         end: CGPoint(x: rect.maxX, y: rect.minY),
         options: []
     )
 
-    context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.10))
-    context.fillEllipse(in: CGRect(
-        x: rect.minX - rect.width * 0.25,
-        y: rect.midY,
-        width: rect.width * 0.95,
-        height: rect.width * 0.95
-    ))
+    // 科技网格
+    context.setStrokeColor(neon.withAlphaComponent(0.075).cgColor)
+    context.setLineWidth(max(size * 0.0012, 0.6))
+    let step = size / 12
+    var line = rect.minX + step
+    while line < rect.maxX {
+        context.move(to: CGPoint(x: line, y: rect.minY))
+        context.addLine(to: CGPoint(x: line, y: rect.maxY))
+        line += step
+    }
+    var row = rect.minY + step
+    while row < rect.maxY {
+        context.move(to: CGPoint(x: rect.minX, y: row))
+        context.addLine(to: CGPoint(x: rect.maxX, y: row))
+        row += step
+    }
+    context.strokePath()
+
+    let aura = CGGradient(
+        colorsSpace: CGColorSpaceCreateDeviceRGB(),
+        colors: [
+            neon.withAlphaComponent(0.30).cgColor,
+            neon.withAlphaComponent(0).cgColor,
+        ] as CFArray,
+        locations: [0, 1]
+    )!
+    context.drawRadialGradient(
+        aura,
+        startCenter: CGPoint(x: size * 0.50, y: size * 0.55),
+        startRadius: 0,
+        endCenter: CGPoint(x: size * 0.50, y: size * 0.55),
+        endRadius: size * 0.42,
+        options: []
+    )
     context.restoreGState()
 
-    // 参考 Bob 的对话气泡轮廓：白色气泡 + 深蓝字形，缩小后仍可辨认。
-    let bubbleRect = CGRect(
-        x: size * 0.20,
-        y: size * 0.28,
-        width: size * 0.60,
-        height: size * 0.45
-    )
-    let bubbleRadius = size * 0.13
-    let bubble = CGMutablePath()
-    bubble.addRoundedRect(
-        in: bubbleRect,
-        cornerWidth: bubbleRadius,
-        cornerHeight: bubbleRadius
-    )
-    bubble.move(to: CGPoint(x: size * 0.31, y: size * 0.30))
-    bubble.addLine(to: CGPoint(x: size * 0.27, y: size * 0.17))
-    bubble.addLine(to: CGPoint(x: size * 0.43, y: size * 0.30))
-    bubble.closeSubpath()
-
+    // 幽灵本体
+    let ghost = ghostPath(size: size)
     context.saveGState()
     context.setShadow(
-        offset: CGSize(width: 0, height: -size * 0.012),
-        blur: size * 0.035,
-        color: CGColor(srgbRed: 0.10, green: 0.16, blue: 0.45, alpha: 0.30)
+        offset: .zero,
+        blur: size * 0.045,
+        color: neon.withAlphaComponent(0.45).cgColor
     )
-    context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
-    context.addPath(bubble)
+    context.setFillColor(bodyColor.cgColor)
+    context.addPath(ghost)
     context.fillPath()
     context.restoreGState()
 
-    let font = NSFont(name: "PingFangSC-Semibold", size: size * 0.255)
-        ?? NSFont.systemFont(ofSize: size * 0.255, weight: .bold)
-    let attributes: [NSAttributedString.Key: Any] = [
-        .font: font,
-        .foregroundColor: NSColor(srgbRed: 0.20, green: 0.30, blue: 0.82, alpha: 1),
-    ]
-    let text = "译" as NSString
-    let textSize = text.size(withAttributes: attributes)
-    text.draw(
-        at: NSPoint(
-            x: bubbleRect.midX - textSize.width / 2,
-            y: bubbleRect.midY - textSize.height / 2 + size * 0.008
-        ),
-        withAttributes: attributes
-    )
+    context.setStrokeColor(rimColor.cgColor)
+    context.setLineWidth(size * 0.008)
+    context.addPath(ghost)
+    context.strokePath()
 
-    // 右上角两点高光，呼应 AI 的轻盈感。
-    context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.92))
+    // 小手臂
+    context.setFillColor(bodyColor.cgColor)
     context.fillEllipse(in: CGRect(
-        x: size * 0.775,
-        y: size * 0.745,
-        width: size * 0.030,
-        height: size * 0.030
+        x: size * 0.155, y: size * 0.38,
+        width: size * 0.11, height: size * 0.15
     ))
-    context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.55))
     context.fillEllipse(in: CGRect(
-        x: size * 0.825,
-        y: size * 0.685,
-        width: size * 0.018,
-        height: size * 0.018
+        x: size * 0.735, y: size * 0.38,
+        width: size * 0.11, height: size * 0.15
     ))
+
+    // 眼睛
+    context.setFillColor(inkColor.cgColor)
+    for centerX in [0.415, 0.585] {
+        let eyeRadius = size * 0.028
+        context.fillEllipse(in: CGRect(
+            x: size * centerX - eyeRadius,
+            y: size * 0.555 - eyeRadius,
+            width: eyeRadius * 2,
+            height: eyeRadius * 2
+        ))
+    }
+
+    context.setFillColor(NSColor.white.cgColor)
+    for centerX in [0.407, 0.577] {
+        context.fillEllipse(in: CGRect(
+            x: size * centerX,
+            y: size * 0.570,
+            width: size * 0.011,
+            height: size * 0.011
+        ))
+    }
+
+    // 腮红
+    context.setFillColor(blushColor.cgColor)
+    for centerX in [0.315, 0.685] {
+        context.fillEllipse(in: CGRect(
+            x: size * centerX - size * 0.035,
+            y: size * 0.485,
+            width: size * 0.070,
+            height: size * 0.036
+        ))
+    }
+
+    // 微笑
+    context.setStrokeColor(inkColor.cgColor)
+    context.setLineWidth(size * 0.012)
+    context.setLineCap(.round)
+    context.addArc(
+        center: CGPoint(x: size * 0.50, y: size * 0.505),
+        radius: size * 0.050,
+        startAngle: 205 * .pi / 180,
+        endAngle: 335 * .pi / 180,
+        clockwise: false
+    )
+    context.strokePath()
+
+    // sparkles：顶部主星 + 两侧小星
+    let white = NSColor.white
+    context.saveGState()
+    context.setShadow(
+        offset: .zero,
+        blur: size * 0.030,
+        color: neon.withAlphaComponent(0.65).cgColor
+    )
+    context.setFillColor(white.cgColor)
+    context.addPath(starPath(
+        center: CGPoint(x: size * 0.50, y: size * 0.872),
+        outer: size * 0.038,
+        inner: size * 0.013
+    ))
+    context.fillPath()
+    context.restoreGState()
+
+    context.setFillColor(neon.cgColor)
+    context.addPath(starPath(
+        center: CGPoint(x: size * 0.165, y: size * 0.73),
+        outer: size * 0.042,
+        inner: size * 0.014
+    ))
+    context.fillPath()
+
+    context.setFillColor(white.withAlphaComponent(0.85).cgColor)
+    context.addPath(starPath(
+        center: CGPoint(x: size * 0.845, y: size * 0.70),
+        outer: size * 0.030,
+        inner: size * 0.010
+    ))
+    context.fillPath()
 
     image.unlockFocus()
     return image

@@ -21,13 +21,14 @@ final class PopupController {
     private var forcedRegularPolicy = false
     private(set) var isVisible = false
     var onOpenSettings: (() -> Void)?
+    var onOpenHistory: (() -> Void)?
 
     private static let originXKey = "LingolitePopupOriginX"
     private static let originYKey = "LingolitePopupOriginY"
 
-    init(store: SettingsStore, service: TranslationService) {
+    init(store: SettingsStore, service: TranslationService, history: HistoryStore) {
         self.store = store
-        model = PopupViewModel(store: store, service: service)
+        model = PopupViewModel(store: store, service: service, history: history)
         panel = LingolitePanel(
             contentRect: NSRect(origin: .zero, size: Self.size),
             styleMask: [.borderless, .resizable],
@@ -50,6 +51,7 @@ final class PopupController {
             store: store,
             onClose: { [weak self] in self?.hide() },
             onOpenSettings: { [weak self] in self?.onOpenSettings?() },
+            onOpenHistory: { [weak self] in self?.onOpenHistory?() },
             onResize: { [weak self] translation in self?.resize(by: translation) },
             onResizeEnd: { [weak self] in self?.finishResize() }
         )

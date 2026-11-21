@@ -9,12 +9,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var popupController: PopupController?
     private var settingsWindowController: SettingsWindowController?
     private var onboardingWindowController: OnboardingWindowController?
+    private var historyWindowController: HistoryWindowController?
     private var cancellables = Set<AnyCancellable>()
     private var isReadingSelection = false
 
     private let settingsStore = SettingsStore()
     private let translationService = TranslationService()
-    private let screenshotSelector = ScreenshotSelector()
+    private let historyStore = HistoryStore()
     private let toastController = ToastController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -28,8 +29,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        popupController = PopupController(store: settingsStore, service: translationService)
+        popupController = PopupController(
+            store: settingsStore,
+            service: translationService,
+            history: historyStore
+        )
         settingsWindowController = SettingsWindowController(store: settingsStore)
+        historyWindowController = HistoryWindowController(store: historyStore)
         settingsWindowController?.onStatusIconPreview = { [weak self] name in
             self?.applyStatusIcon(name)
         }
@@ -39,6 +45,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         popupController?.onOpenSettings = { [weak self] in
             self?.settingsWindowController?.show()
+        }
+        popupController?.onOpenHistory = { [weak self] in
+            self?.openHistory()
         }
 
         let center = HotKeyCenter()
@@ -84,6 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         menu.addItem(menuItem(title: "使用指南…", action: #selector(showOnboarding)))
+        menu.addItem(menuItem(title: "历史记录…", action: #selector(openHistory), keyEquivalent: "y"))
         menu.addItem(.separator())
         menu.addItem(menuItem(title: "设置…", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(menuItem(title: "辅助功能权限…", action: #selector(openAccessibilitySettings)))
@@ -223,9 +233,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(menuItem(title: "关于 Lingolite", action: #selector(showAbout)))
         appMenu.addItem(.separator())
         appMenu.addItem(menuItem(title: "设置…", action: #selector(openSettings), keyEquivalent: ","))
+        appMenu.addItem(menuItem(title: "历史记录…", action: #selector(openHistory), keyEquivalent: "y"))
         appMenu.addItem(.separator())
         appMenu.addItem(menuItem(title: "退出 Lingolite", action: #selector(quit), keyEquivalent: "q"))
         appMenuItem.submenu = appMenu
+
+        let historyMenuItem = NSMenuItem()
+        mainMenu.addItem(historyMenuItem)
+        let historyMenu = NSMenu(title: "历史")
+        historyMenu.addItem(menuItem(title: "显示历史记录", action: #selector(openHistory), keyEquivalent: "y"))
+        historyMenu.addItem(menuItem(title: "清空历史记录…", action: #selector(clearHistory)))
+        historyMenuItem.submenu = historyMenu
 
         let editMenuItem = NSMenuItem()
         mainMenu.addItem(editMenuItem)
@@ -327,18 +345,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        screenshotSelector.start { rect in
-            guard let rect else { return }
-            OCREngine.capture(rect: rect) { result in
-                switch result {
-                case let .success(text):
-                    onText(text)
-                case let .failure(error):
-                    if let ocrError = error as? OCREngine.OCRError, case .cancelled = ocrError {
-                        return
-                    }
-                    onError(error.localizedDescription)
+        OCREngine.captureInteractive { result in
+            switch result {
+            case let .success(text):
+                onText(text)
+            case let .failure(error):
+                if let ocrError = error as? OCREngine.OCRError, case .cancelled = ocrError {
+                    return
                 }
+                onError(error.localizedDescription)
             }
         }
     }
@@ -364,6 +379,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings() {
         settingsWindowController?.show()
+    }
+
+    @objc private func openHistory() {
+        historyWindowController?.show()
+    }
+
+    @objc private func clearHistory() {
+        let alert = NSAlert()
+        alert.messageText = "清空全部历史记录？"
+        alert.informativeText = "此操作不可撤销。"
+        alert.addButton(withTitle: "清空")
+        alert.addButton(withTitle: "取消")
+        if alert.runModal() == .alertFirstButtonReturn {
+            historyStore.clear()
+        }
     }
 
     @objc private func openAccessibilitySettings() {

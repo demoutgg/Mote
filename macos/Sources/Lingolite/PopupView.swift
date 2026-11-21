@@ -7,6 +7,7 @@ struct PopupView: View {
     @ObservedObject var store: SettingsStore
     var onClose: () -> Void
     var onOpenSettings: () -> Void
+    var onOpenHistory: () -> Void
     var onResize: (CGSize) -> Void
     var onResizeEnd: () -> Void
 
@@ -65,6 +66,16 @@ struct PopupView: View {
             Spacer()
 
             languageMenu
+
+            Button(action: onOpenHistory) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("历史记录")
 
             Button(action: onOpenSettings) {
                 Image(systemName: "gearshape")

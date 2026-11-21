@@ -25,12 +25,14 @@ final class PopupViewModel: ObservableObject {
 
     private let store: SettingsStore
     private let service: TranslationService
+    private let history: HistoryStore
     private var task: Task<Void, Never>?
     private var copyResetTask: Task<Void, Never>?
 
-    init(store: SettingsStore, service: TranslationService) {
+    init(store: SettingsStore, service: TranslationService, history: HistoryStore) {
         self.store = store
         self.service = service
+        self.history = history
     }
 
     func translate() {
@@ -81,6 +83,11 @@ final class PopupViewModel: ObservableObject {
 
             guard !Task.isCancelled else { return }
             self.isTranslating = false
+            self.history.add(
+                source: text,
+                targetLanguage: config.targetLanguageLabel,
+                results: self.results
+            )
 
             if config.autoCopy, let output = self.results
                 .first(where: { !$0.text.isEmpty })?

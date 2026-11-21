@@ -28,23 +28,15 @@ enum OCREngine {
         _ = CGRequestScreenCaptureAccess()
     }
 
-    static func capture(rect: CGRect, completion: @escaping (Result<String, Error>) -> Void) {
+    static func captureInteractive(completion: @escaping (Result<String, Error>) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("lingolite-ocr-\(UUID().uuidString).png")
             defer { try? FileManager.default.removeItem(at: url) }
 
-            // 等遮罩完全消失，避免把选框画进截图。
-            usleep(120_000)
-
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-            process.arguments = [
-                "-x",
-                "-R",
-                "\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width)),\(Int(rect.height))",
-                url.path,
-            ]
+            process.arguments = ["-i", "-x", url.path]
             do {
                 try process.run()
             } catch {
