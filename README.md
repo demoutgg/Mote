@@ -123,7 +123,7 @@ OCR 在独立子进程 `MoteOCR` 里跑，识别完立即退出，主应用不�
 
 Windows 版功能已按 macOS 对齐：可自定义快捷键、系统提示词、自动复制、弹窗尺寸与位置记忆、失焦收起、历史搜索与复制原文/译文、AI 预设与模型列表、关于菜单。
 
-> **Windows 版尚未经过实际运行自测。** 仓库里只有源码，没有随 Release 提供预编译的 exe。代码在 macOS 上完成，无法在本机编译验证（项目依赖 WinRT/cppwinrt，需要 MSVC + Windows SDK）。如果你在 Windows 上构建时遇到报错，欢迎提 issue 附上报错原文。
+> **Windows 版尚未经过实机运行自测。** 代码在 macOS 上完成，CI 只验证了能够编译通过，没有人真正在 Windows 上跑过完整流程。Release 里附带的 `Mote-<版本>-windows-x64.zip` 属于未验证产物，请自行评估后使用；遇到问题欢迎提 issue，附上系统版本与报错原文。
 
 构建方式见 [docs/BUILD.md](docs/BUILD.md)。
 

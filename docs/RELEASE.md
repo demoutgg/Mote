@@ -93,7 +93,7 @@ gh release create v0.9.0 \
   --title "Mote 0.9.0" --notes-file RELEASE_NOTES.md --latest
 ```
 
-Windows 没有自测过的版本，不要附预编译 exe，说明里让用户自行构建。
+Windows 产物由 CI 编译，未经实机运行验证，Release 说明里必须写清这一点。
 
 ### Release 说明模板
 
@@ -109,7 +109,7 @@ Windows 没有自测过的版本，不要附预编译 exe，说明里让用户�
 
 ## 已知问题
 
-- Windows 版未经实机自测，仓库不提供预编译 exe，请参考 docs/BUILD.md 自行编译。
+- Windows 版未经实机运行验证（CI 只验证编译通过），请自行评估或参考 docs/BUILD.md 自行编译。
 - 重新编译后 ad-hoc 签名变化，需要重新授权辅助功能与屏幕录制。
 ```
 
