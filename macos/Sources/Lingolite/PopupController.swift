@@ -1,6 +1,5 @@
 // 鼠标附近的悬浮翻译窗：负责显示、定位和焦点归还；不处理选区读取。
 import AppKit
-import SwiftUI
 
 final class LingolitePanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -17,9 +16,9 @@ final class PopupController {
     private var resignObserver: NSObjectProtocol?
     private var moveObserver: NSObjectProtocol?
     private var previousApplication: NSRunningApplication?
-    private var resizeStartFrame: NSRect?
     private var forcedRegularPolicy = false
     private var contentConfigured = false
+    private var popupContent: PopupContentView?
     private(set) var isVisible = false
     var onOpenSettings: (() -> Void)?
     var onOpenHistory: (() -> Void)?
@@ -106,6 +105,10 @@ final class PopupController {
 
         panel.makeKeyAndOrderFront(nil)
         panel.makeKey()
+        popupContent?.focusEditor()
+        DispatchQueue.main.async { [weak self] in
+            self?.popupContent?.focusEditor()
+        }
         activateAppIfNeeded()
 
         if !sourceText.isEmpty {
@@ -118,6 +121,10 @@ final class PopupController {
         isVisible = false
         model.cancel()
         panel.orderOut(nil)
+        // AppKit 子视图在关闭时也释放，避免多次使用后内存只涨不降。
+        panel.contentView = nil
+        popupContent = nil
+        contentConfigured = false
 
         if restoreFocus,
            let previousApplication,
@@ -137,43 +144,21 @@ final class PopupController {
         model.errorMessage = message
     }
 
-    func resize(by translation: CGSize) {
-        if resizeStartFrame == nil {
-            resizeStartFrame = panel.frame
-        }
-        guard let start = resizeStartFrame else { return }
-
-        let width = min(max(start.width + translation.width, 460), 900)
-        let height = min(max(start.height - translation.height, 340), 800)
-        var frame = start
-        frame.origin.y = start.maxY - height
-        frame.size = NSSize(width: width, height: height)
-        panel.setFrame(frame, display: true)
-    }
-
-    private func finishResize() {
-        resizeStartFrame = nil
-        store.config.popupWidth = Double(panel.frame.width)
-        store.config.popupHeight = Double(panel.frame.height)
-        store.save()
-        saveOrigin()
-    }
-
-    // SwiftUI 只在第一次需要弹窗时加载，避免菜单栏常驻时占用图形框架内存。
+    // 弹窗内容按需创建，保持菜单栏常驻时只加载 AppKit。
     private func configureContentIfNeeded() {
         guard !contentConfigured else { return }
         contentConfigured = true
 
-        let view = PopupView(
+        let content = PopupContentView(
             model: model,
             store: store,
             onClose: { [weak self] in self?.hide() },
             onOpenSettings: { [weak self] in self?.onOpenSettings?() },
-            onOpenHistory: { [weak self] in self?.onOpenHistory?() },
-            onResize: { [weak self] translation in self?.resize(by: translation) },
-            onResizeEnd: { [weak self] in self?.finishResize() }
+            onOpenHistory: { [weak self] in self?.onOpenHistory?() }
         )
-        panel.contentView = NSHostingView(rootView: view)
+        content.autoresizingMask = [.width, .height]
+        popupContent = content
+        panel.contentView = content
     }
 
     private var savedOrigin: NSPoint? {
