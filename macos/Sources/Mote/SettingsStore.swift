@@ -159,9 +159,8 @@ final class SettingsStore: ObservableObject {
         } else {
             config = AppConfig()
         }
-        KeychainStore.migrateLegacyIfNeeded()
-        apiKey = KeychainStore.read() ?? ""
-        baiduKey = KeychainStore.read(account: "baidu-key") ?? ""
+        apiKey = SecretStore.read() ?? ""
+        baiduKey = SecretStore.read(account: "baidu-key") ?? ""
     }
 
     func save() {
@@ -181,11 +180,11 @@ final class SettingsStore: ObservableObject {
         if let data = try? encoder.encode(config) {
             try? data.write(to: configURL, options: .atomic)
         }
-        KeychainStore.save(apiKey.trimmingCharacters(in: .whitespacesAndNewlines))
-        KeychainStore.save(
-            baiduKey.trimmingCharacters(in: .whitespacesAndNewlines),
-            account: "baidu-key"
-        )
+        // 先回写 trim 后的值，否则当前会话仍用带换行/空格的旧 key，重启才对
+        apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        baiduKey = baiduKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        SecretStore.save(apiKey)
+        SecretStore.save(baiduKey, account: "baidu-key")
     }
 }
 

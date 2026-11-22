@@ -37,8 +37,10 @@ final class HistoryStore: ObservableObject {
             .map { HistoryResult(id: $0.id, title: $0.title, text: $0.text) }
         guard !items.isEmpty else { return }
 
+        // 目标语言也算一次新的翻译，否则换语言后的译文会被当成重复丢掉
         if let latest = entries.first,
            latest.source == source,
+           latest.targetLanguage == targetLanguage,
            latest.results.map(\.text) == items.map(\.text) {
             return
         }
@@ -55,11 +57,6 @@ final class HistoryStore: ObservableObject {
 
     func clear() {
         entries = []
-        save()
-    }
-
-    func delete(_ entry: HistoryEntry) {
-        entries.removeAll { $0.id == entry.id }
         save()
     }
 

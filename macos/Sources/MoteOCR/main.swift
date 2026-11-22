@@ -1,4 +1,6 @@
 // Mote 的 OCR 子进程：读取截图、识别文字并输出到 stdout；不处理 UI 和翻译。
+import ApplicationServices
+import CoreGraphics
 import Foundation
 import ImageIO
 import Vision
@@ -64,6 +66,15 @@ func recognize(path: String) throws -> String {
 
     guard !text.isEmpty else { throw HelperError.emptyText }
     return text
+}
+
+// 供主进程查询权限：主进程内的判定按进程缓存，子进程每次都读当前状态
+if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--permissions" {
+    let accessibility = AXIsProcessTrusted()
+    let screen = CGPreflightScreenCaptureAccess()
+    let text = "ax=\(accessibility ? 1 : 0) screen=\(screen ? 1 : 0)"
+    FileHandle.standardOutput.write(Data(text.utf8))
+    exit(0)
 }
 
 guard CommandLine.arguments.count >= 2 else {

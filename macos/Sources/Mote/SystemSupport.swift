@@ -14,7 +14,8 @@ enum AppActivation {
     static func activate(_ window: NSWindow) {
         NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            guard !NSApp.isActive else { return }
+            // 窗口可能已被主动隐藏（如授权时让位给系统设置），不能再拉回来
+            guard !NSApp.isActive, window.isVisible else { return }
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)

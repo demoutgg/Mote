@@ -5,13 +5,10 @@ import CoreGraphics
 import Darwin
 
 enum SelectionReader {
+    /// 判据交给 PermissionProbe：AXUIElementCopyAttributeValue 在无权限时既可能
+    /// 返回 .apiDisabled 也可能返回 success，不能当判据用。
     static var hasAccessibilityPermission: Bool {
-        AXIsProcessTrusted()
-    }
-
-    static func requestAccessibilityPermission() {
-        let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-        _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
+        PermissionProbe.accessibility()
     }
 
     /// 在后台队列读取，避免模拟复制时的等待阻塞主线程刷新界面。

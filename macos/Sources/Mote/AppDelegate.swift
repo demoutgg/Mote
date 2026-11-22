@@ -1,5 +1,6 @@
 // 应用入口：菜单栏、全局快捷键、权限引导；不含翻译业务逻辑。
 import AppKit
+import ApplicationServices
 import Carbon.HIToolbox
 import Combine
 
@@ -8,7 +9,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyCenter: HotKeyCenter?
     private var popupController: PopupController?
     private var settingsWindowController: SettingsWindowController?
-    private var onboardingWindowController: OnboardingWindowController?
     private var historyWindowController: HistoryWindowController?
     private var cancellables = Set<AnyCancellable>()
     private var isReadingSelection = false
@@ -19,7 +19,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let toastController = ToastController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        migrateLegacyDefaults()
         LaunchAtLogin.migrateLegacyIfNeeded()
         setupMainMenu()
         setupStatusItem()
@@ -44,10 +43,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindowController?.onStatusIconPreview = { [weak self] name in
             self?.applyStatusIcon(name)
         }
-        onboardingWindowController = OnboardingWindowController(
-            store: settingsStore,
-            onOpenSettings: { [weak self] in self?.settingsWindowController?.show() }
-        )
         popupController?.onOpenSettings = { [weak self] in
             self?.settingsWindowController?.show()
         }
@@ -68,9 +63,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        if !UserDefaults.standard.bool(forKey: OnboardingWindowController.completedKey) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                self?.onboardingWindowController?.show()
+        promptPermissionsIfNeeded()
+        handlePreviewArgument()
+    }
+
+    /// 启动后仍缺权限时提示一次（24 小时内不重复）；否则用户只有按到快捷键才会见到引导
+    private func promptPermissionsIfNeeded() {
+        let missing = !SelectionReader.hasAccessibilityPermission || !OCREngine.hasScreenPermission
+        guard missing else { return }
+
+        let key = "lastPermissionPromptAt"
+        let last = UserDefaults.standard.double(forKey: key)
+        guard Date().timeIntervalSince1970 - last > 24 * 3600 else { return }
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: key)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            PermissionGuideController.shared.show()
+        }
+    }
+
+    /// 开发用：带 `--preview=settings|history|permission|popup` 启动时直接开对应窗口，便于截图核对样式
+    private func handlePreviewArgument() {
+        let prefix = "--preview="
+        guard let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(prefix) }) else {
+            return
+        }
+        let target = String(argument.dropFirst(prefix.count))
+        // settings:0…3 指定分页
+        let parts = target.split(separator: ":")
+        let paneIndex = parts.count > 1 ? Int(parts[1]) : nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            if let paneIndex {
+                self?.settingsWindowController?.show(pane: paneIndex)
+                return
+            }
+            switch target {
+            case "settings":
+                self?.settingsWindowController?.show()
+            case "history":
+                self?.historyWindowController?.show()
+            case "permission":
+                PermissionGuideController.shared.show()
+            case "selection":
+                self?.translateSelection()
+            case "screenshot":
+                self?.captureAndTranslate()
+            case "popup":
+                self?.popupController?.show(sourceText: "Translation should feel instant. Mote keeps the window small, the shortcuts out of the way, and the result in your clipboard when you want it.")
+            default:
+                break
             }
         }
     }
@@ -82,56 +123,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildStatusMenu()
     }
 
-    private func migrateLegacyDefaults() {
-        let key = OnboardingWindowController.completedKey
-        let current = UserDefaults.standard
-        guard !current.bool(forKey: key),
-              let legacy = UserDefaults(suiteName: "com.demoutgg.lingolite"),
-              legacy.bool(forKey: key) else {
-            return
-        }
-        current.set(true, forKey: key)
-    }
-
     private func rebuildStatusMenu() {
         guard let item = statusItem else { return }
         let menu = NSMenu()
         for action in ShortcutAction.allCases {
             let binding = settingsStore.config.binding(for: action)
-            menu.addItem(
-                menuItem(
-                    title: action.title,
-                    action: selector(for: action),
-                    keyEquivalent: binding.keyEquivalent,
-                    modifiers: binding.eventModifiers
-                )
+            let actionItem = menuItem(
+                title: action.title,
+                action: #selector(performMenuItem(_:)),
+                keyEquivalent: binding.keyEquivalent,
+                modifiers: binding.eventModifiers
             )
+            // 用 representedObject 带回动作，菜单与快捷键共用同一个 perform(_:)
+            actionItem.representedObject = action.rawValue
+            menu.addItem(actionItem)
         }
         menu.addItem(menuItem(title: "历史记录…", action: #selector(openHistory), keyEquivalent: "y"))
-        menu.addItem(menuItem(title: "使用指南…", action: #selector(showOnboarding)))
         menu.addItem(.separator())
-        menu.addItem(menuItem(title: "设置…", action: #selector(openSettings), keyEquivalent: ","))
-        menu.addItem(menuItem(title: "辅助功能权限…", action: #selector(openAccessibilitySettings)))
-        menu.addItem(menuItem(title: "屏幕录制权限…", action: #selector(openScreenRecordingSettings)))
+        // 状态栏菜单弹出时应用未激活，菜单项的 ⌘ 快捷键不会生效，只留标题
+        menu.addItem(menuItem(title: "设置", action: #selector(openSettings)))
         menu.addItem(.separator())
         menu.addItem(menuItem(title: "关于 Mote", action: #selector(showAbout)))
         menu.addItem(menuItem(title: "退出 Mote", action: #selector(quit), keyEquivalent: "q"))
         item.menu = menu
     }
 
-    private func selector(for action: ShortcutAction) -> Selector {
-        switch action {
-        case .input:
-            return #selector(openManual)
-        case .selection:
-            return #selector(translateSelection)
-        case .clipboard:
-            return #selector(translateClipboard)
-        case .screenshot:
-            return #selector(captureAndTranslate)
-        case .screenshotOCR:
-            return #selector(captureOCR)
-        }
+    @objc private func performMenuItem(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let action = ShortcutAction(rawValue: raw) else { return }
+        perform(action)
     }
 
     private func registerHotKeys() {
@@ -199,7 +219,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.image = nil
             button.title = "译"
         }
-        button.toolTip = "Mote · 选中文本按 ⌥D 翻译"
+        let selection = settingsStore.config.binding(for: .selection).display
+        button.toolTip = "Mote · 选中文本按 \(selection) 翻译"
     }
 
     private func setupMainMenu() {
@@ -219,7 +240,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let historyMenuItem = NSMenuItem()
         mainMenu.addItem(historyMenuItem)
         let historyMenu = NSMenu(title: "历史")
-        historyMenu.addItem(menuItem(title: "显示历史记录", action: #selector(openHistory), keyEquivalent: "y"))
+        // ⌘Y 已绑在上面的「历史记录…」，这里不再重复绑定
+        historyMenu.addItem(menuItem(title: "显示历史记录", action: #selector(openHistory)))
         historyMenu.addItem(menuItem(title: "清空历史记录…", action: #selector(clearHistory)))
         historyMenuItem.submenu = historyMenu
 
@@ -269,25 +291,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard !isReadingSelection else { return }
 
-        if !SelectionReader.hasAccessibilityPermission {
-            SelectionReader.requestAccessibilityPermission()
+        guard SelectionReader.hasAccessibilityPermission else {
+            PermissionGuideController.shared.show()
+            return
         }
 
         isReadingSelection = true
         SelectionReader.read { [weak self] text in
             guard let self else { return }
             self.isReadingSelection = false
-            if text.isEmpty {
+            // 读空就不弹窗：多数是没选中文本；若同时权限也没了（判定与读取之间有竞态），补一次引导
+            guard !text.isEmpty else {
                 if !SelectionReader.hasAccessibilityPermission {
-                    self.popupController?.showPlaceholder(
-                        message: "选中翻译需要“辅助功能”权限。请在系统设置中授权后重试 ⌥D。"
-                    )
-                } else {
-                    self.popupController?.show(sourceText: "")
+                    PermissionGuideController.shared.show()
                 }
-            } else {
-                self.popupController?.show(sourceText: text)
+                return
             }
+            self.popupController?.show(sourceText: text)
         }
     }
 
@@ -318,8 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onError: @escaping (String) -> Void
     ) {
         guard OCREngine.hasScreenPermission else {
-            OCREngine.requestScreenPermission()
-            onError("截图功能需要“屏幕录制”权限。请在系统设置中授权；如果授权后仍提示，请重启 Mote 再试。")
+            PermissionGuideController.shared.show()
             return
         }
 
@@ -342,11 +361,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popupController.hide()
             return
         }
-        if let text = clipboardText() {
-            popupController.show(sourceText: text)
-        } else {
-            popupController.showPlaceholder(message: "剪贴板里没有可翻译的文本。")
-        }
+        // 剪贴板没有文本时什么都不做，和选中翻译一致：不弹空窗口
+        guard let text = clipboardText() else { return }
+        popupController.show(sourceText: text)
     }
 
     private func clipboardText() -> String? {
@@ -364,32 +381,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func clearHistory() {
-        let alert = NSAlert()
-        alert.messageText = "清空全部历史记录？"
-        alert.informativeText = "此操作不可撤销。"
-        alert.addButton(withTitle: "清空")
-        alert.addButton(withTitle: "取消")
-        if alert.runModal() == .alertFirstButtonReturn {
-            historyStore.clear()
-        }
-    }
-
-    @objc private func openAccessibilitySettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
-            return
-        }
-        NSWorkspace.shared.open(url)
-    }
-
-    @objc private func openScreenRecordingSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else {
-            return
-        }
-        NSWorkspace.shared.open(url)
-    }
-
-    @objc private func showOnboarding() {
-        onboardingWindowController?.show()
+        // 与历史页共用同一个确认 sheet，文案和行为保持一致
+        historyWindowController?.confirmClear()
     }
 
     @objc private func showAbout() {
@@ -398,7 +391,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .applicationName: "Mote",
             .applicationVersion: version,
             .credits: NSAttributedString(
-                string: "轻量、原生的 AI 翻译工具\n⌥D 选中翻译 · ⌥S 截图翻译 · ⇧⌥S 截图 OCR",
+                string: "轻量、原生的 AI 翻译工具",
                 attributes: [.font: NSFont.systemFont(ofSize: 11)]
             ),
         ])

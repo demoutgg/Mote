@@ -1,0 +1,350 @@
+// 历史记录视图（纯 AppKit）：搜索、查看和复制最近 100 条；不负责写入历史。
+import AppKit
+import Combine
+
+final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
+    private let store: HistoryStore
+    private let showsHeader: Bool
+    private let onClose: () -> Void
+
+    private let searchField = NSSearchField()
+    private let tableView = NSTableView()
+    private let scroll = NSScrollView()
+    private let emptyLabel = NSTextField(labelWithString: "")
+    private let clearButton = NSButton()
+    private var cancellables = Set<AnyCancellable>()
+    private var filtered: [HistoryEntry] = []
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日 HH:mm"
+        return formatter
+    }()
+
+    init(store: HistoryStore, showsHeader: Bool, onClose: @escaping () -> Void = {}) {
+        self.store = store
+        self.showsHeader = showsHeader
+        self.onClose = onClose
+        super.init(frame: .zero)
+        setup()
+        bind()
+        reload()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func setup() {
+        let title = NSTextField(labelWithString: "历史记录")
+        title.font = .systemFont(ofSize: 15, weight: .semibold)
+        title.isHidden = !showsHeader
+
+        let count = NSTextField(labelWithString: "最近 100 条")
+        count.font = .systemFont(ofSize: 11)
+        count.textColor = .tertiaryLabelColor
+
+        clearButton.title = "清空"
+        clearButton.bezelStyle = .rounded
+        clearButton.controlSize = .small
+        clearButton.font = .systemFont(ofSize: 11)
+        clearButton.target = self
+        clearButton.action = #selector(confirmClear)
+        // 嵌在设置页时「清空」移到窗口底部按钮条，避免和「最近 100 条」挤在一行
+        clearButton.isHidden = !showsHeader
+
+        let close = FormRow.button("关闭", target: self, action: #selector(closeWindow))
+        close.isHidden = !showsHeader
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let header = NSStackView(views: [title, count, spacer, clearButton, close])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 8
+        header.edgeInsets = NSEdgeInsets(top: 14, left: 20, bottom: 10, right: 20)
+        header.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(header)
+
+        let card = CardView()
+        card.orientation = .vertical
+        card.spacing = 0
+        card.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(card)
+
+        NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: topAnchor),
+            header.leadingAnchor.constraint(equalTo: leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: trailingAnchor),
+
+            card.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 2),
+            card.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            card.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            card.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -20),
+        ])
+
+        searchField.placeholderString = "搜索原文或译文"
+        searchField.font = .systemFont(ofSize: 12)
+        searchField.target = self
+        searchField.action = #selector(searchChanged)
+        searchField.sendsSearchStringImmediately = true
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(searchField)
+
+        let divider = NSView()
+        divider.wantsLayer = true
+        divider.layer?.backgroundColor = NSColor.separatorColor
+            .withAlphaComponent(0.45)
+            .cgColor
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(divider)
+
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("history"))
+        column.resizingMask = .autoresizingMask
+        tableView.addTableColumn(column)
+        tableView.headerView = nil
+        tableView.rowHeight = 52
+        tableView.intercellSpacing = .zero
+        tableView.backgroundColor = .clear
+        tableView.selectionHighlightStyle = .regular
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.target = self
+        tableView.doubleAction = #selector(copySelected)
+
+        scroll.documentView = tableView
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.borderType = .noBorder
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(scroll)
+
+        emptyLabel.font = .systemFont(ofSize: 12)
+        emptyLabel.textColor = .tertiaryLabelColor
+        emptyLabel.alignment = .center
+        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(emptyLabel)
+
+        NSLayoutConstraint.activate([
+            searchField.topAnchor.constraint(equalTo: card.topAnchor, constant: 10),
+            searchField.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
+            searchField.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+
+            divider.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 9),
+            divider.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            divider.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            divider.heightAnchor.constraint(equalToConstant: 1),
+
+            scroll.topAnchor.constraint(equalTo: divider.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+
+            emptyLabel.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: scroll.centerYAnchor, constant: -10),
+        ])
+
+        menu = buildMenu()
+    }
+
+    private func bind() {
+        store.$entries
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.reload() }
+            .store(in: &cancellables)
+    }
+
+    private func reload() {
+        let needle = searchField.stringValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        filtered = needle.isEmpty
+            ? store.entries
+            : store.entries.filter { entry in
+                entry.source.lowercased().contains(needle)
+                    || entry.results.contains { $0.text.lowercased().contains(needle) }
+            }
+        tableView.reloadData()
+        clearButton.isEnabled = !store.entries.isEmpty
+        emptyLabel.stringValue = needle.isEmpty ? "还没有历史记录" : "没有匹配的记录"
+        emptyLabel.isHidden = !filtered.isEmpty
+        scroll.isHidden = filtered.isEmpty
+    }
+
+    private func buildMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "复制原文", action: #selector(copySource), keyEquivalent: "")
+        menu.addItem(withTitle: "复制译文", action: #selector(copyTarget), keyEquivalent: "")
+        for item in menu.items {
+            item.target = self
+        }
+        return menu
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        filtered.count
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor tableColumn: NSTableColumn?,
+        row: Int
+    ) -> NSView? {
+        guard row < filtered.count else { return nil }
+        let entry = filtered[row]
+        let identifier = NSUserInterfaceItemIdentifier("HistoryCell")
+        let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? HistoryCell
+            ?? HistoryCell(identifier: identifier)
+
+        cell.configure(
+            source: entry.source.replacingOccurrences(of: "\n", with: " "),
+            date: Self.dateFormatter.string(from: entry.date),
+            target: entry.results.first?.text.replacingOccurrences(of: "\n", with: " ")
+                ?? entry.source.replacingOccurrences(of: "\n", with: " "),
+            extra: entry.results.count > 1 ? "另有 \(entry.results.count - 1) 个结果" : nil
+        )
+        return cell
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        52
+    }
+
+    @objc private func searchChanged() {
+        reload()
+    }
+
+    /// 右键点在行上就用那一行；键盘选中后从菜单触发时 clickedRow 是 -1，回退到 selectedRow
+    private var actionRow: Int {
+        let row = tableView.clickedRow >= 0 ? tableView.clickedRow : tableView.selectedRow
+        return row >= 0 && row < filtered.count ? row : -1
+    }
+
+    @objc private func copySelected() {
+        guard actionRow >= 0 else { return }
+        copy(filtered[actionRow].results.first?.text ?? filtered[actionRow].source)
+    }
+
+    @objc private func copySource() {
+        guard actionRow >= 0 else { return }
+        copy(filtered[actionRow].source)
+    }
+
+    @objc private func copyTarget() {
+        guard actionRow >= 0 else { return }
+        let entry = filtered[actionRow]
+        copy(entry.results.first?.text ?? entry.source)
+    }
+
+    private func copy(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+
+    @objc func confirmClear() {
+        let alert = NSAlert()
+        alert.messageText = "清空全部历史记录？"
+        alert.informativeText = "清空后无法恢复。"
+        alert.addButton(withTitle: "清空")
+        alert.addButton(withTitle: "取消")
+        guard let window else { return }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            if response == .alertFirstButtonReturn {
+                self?.store.clear()
+            }
+        }
+    }
+
+    @objc private func closeWindow() {
+        onClose()
+    }
+}
+
+private final class HistoryCell: NSTableCellView {
+    private let sourceLabel = NSTextField(labelWithString: "")
+    private let dateLabel = NSTextField(labelWithString: "")
+    private let targetLabel = NSTextField(labelWithString: "")
+    private let separator = NSView()
+
+    init(identifier: NSUserInterfaceItemIdentifier) {
+        super.init(frame: .zero)
+        self.identifier = identifier
+
+        sourceLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        sourceLabel.lineBreakMode = .byTruncatingTail
+        sourceLabel.maximumNumberOfLines = 1
+        sourceLabel.usesSingleLineMode = true
+        dateLabel.font = .systemFont(ofSize: 10)
+        dateLabel.textColor = .tertiaryLabelColor
+        dateLabel.alignment = .right
+        targetLabel.lineBreakMode = .byTruncatingTail
+        targetLabel.font = .systemFont(ofSize: 12)
+        targetLabel.textColor = .secondaryLabelColor
+        targetLabel.maximumNumberOfLines = 1
+        targetLabel.usesSingleLineMode = true
+
+        for view in [sourceLabel, dateLabel, targetLabel] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+
+        separator.wantsLayer = true
+        separator.layer?.backgroundColor = NSColor.separatorColor
+            .withAlphaComponent(0.25)
+            .cgColor
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(separator)
+
+        NSLayoutConstraint.activate([
+            sourceLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            sourceLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            sourceLabel.trailingAnchor.constraint(lessThanOrEqualTo: dateLabel.leadingAnchor, constant: -8),
+
+            dateLabel.centerYAnchor.constraint(equalTo: sourceLabel.centerYAnchor),
+            dateLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            dateLabel.widthAnchor.constraint(equalToConstant: 90),
+
+            targetLabel.topAnchor.constraint(equalTo: sourceLabel.bottomAnchor, constant: 3),
+            targetLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            targetLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+
+            separator.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            separator.bottomAnchor.constraint(equalTo: bottomAnchor),
+            separator.heightAnchor.constraint(equalToConstant: 1),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(source: String, date: String, target: String, extra: String?) {
+        sourceLabel.stringValue = source
+        dateLabel.stringValue = date
+
+        let text = NSMutableAttributedString(
+            string: target,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 12),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+        )
+        if let extra {
+            text.append(NSAttributedString(
+                string: "  · " + extra,
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 10),
+                    .foregroundColor: NSColor.tertiaryLabelColor,
+                ]
+            ))
+        }
+        targetLabel.attributedStringValue = text
+    }
+}

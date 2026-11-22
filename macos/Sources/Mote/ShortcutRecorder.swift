@@ -1,35 +1,34 @@
-// 快捷键录制控件：点击后按下组合键，Esc 取消。
+// 快捷键录制控件：点击后按下组合键，Esc 取消；只负责键盘录入与样式，不写配置。
 import AppKit
-import SwiftUI
-
-struct ShortcutRecorder: NSViewRepresentable {
-    var binding: KeyBinding
-    var onChange: (KeyBinding) -> Void
-
-    func makeNSView(context: Context) -> RecorderView {
-        let view = RecorderView()
-        view.binding = binding
-        view.onChange = onChange
-        return view
-    }
-
-    func updateNSView(_ view: RecorderView, context: Context) {
-        view.binding = binding
-        view.onChange = onChange
-        view.needsDisplay = true
-    }
-}
 
 final class RecorderView: NSView {
-    var binding = ShortcutAction.input.defaultBinding
+    var binding = ShortcutAction.input.defaultBinding {
+        didSet { refreshLabel() }
+    }
+
     var onChange: ((KeyBinding) -> Void)?
+    /// 组合键被拒时的提示文案，交给调用方显示
+    var onReject: ((String) -> Void)?
 
     private var isRecording = false
+    private let titleLabel = NSTextField(labelWithString: "")
 
     override var acceptsFirstResponder: Bool { true }
     override var intrinsicContentSize: NSSize { NSSize(width: 96, height: 24) }
 
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        installLabelIfNeeded()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        installLabelIfNeeded()
+    }
+
     override func draw(_ dirtyRect: NSRect) {
+        installLabelIfNeeded()
+
         let path = NSBezierPath(
             roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
             xRadius: 6,
@@ -37,42 +36,34 @@ final class RecorderView: NSView {
         )
         (isRecording
             ? NSColor.controlAccentColor.withAlphaComponent(0.14)
-            : NSColor.controlBackgroundColor
+            : NSColor.quaternaryLabelColor.withAlphaComponent(0.08)
         ).setFill()
         path.fill()
 
-        (isRecording ? NSColor.controlAccentColor : NSColor.separatorColor).setStroke()
+        (isRecording
+            ? NSColor.controlAccentColor
+            : NSColor.separatorColor.withAlphaComponent(0.6)
+        ).setStroke()
         path.lineWidth = 1
         path.stroke()
-
-        let text = isRecording ? "按下快捷键…" : binding.display
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .medium),
-            .foregroundColor: isRecording ? NSColor.controlAccentColor : NSColor.labelColor,
-        ]
-        let size = (text as NSString).size(withAttributes: attributes)
-        (text as NSString).draw(
-            at: NSPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2),
-            withAttributes: attributes
-        )
     }
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         isRecording = true
-        needsDisplay = true
+        refreshLabel()
     }
 
     override func resignFirstResponder() -> Bool {
         isRecording = false
-        needsDisplay = true
+        refreshLabel()
         return true
     }
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 {
             isRecording = false
-            needsDisplay = true
+            refreshLabel()
             return
         }
 
@@ -83,15 +74,54 @@ final class RecorderView: NSView {
             return
         }
 
+        if let reason = Self.rejectionReason(for: event) {
+            NSSound.beep()
+            onReject?(reason)
+            return
+        }
+
         let newBinding = KeyBinding(
             keyCode: UInt32(event.keyCode),
             modifiers: carbonModifiers,
             display: KeyBinding.displayString(flags: flags, event: event),
             keyEquivalent: event.charactersIgnoringModifiers?.lowercased() ?? ""
         )
-        binding = newBinding
         isRecording = false
+        binding = newBinding
         onChange?(newBinding)
+        refreshLabel()
+    }
+
+    /// 背景用 draw 画，文字交给 NSTextField：手写 NSString.draw 在翻转坐标里会画成倒的
+    private func installLabelIfNeeded() {
+        guard titleLabel.superview == nil else { return }
+        titleLabel.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
+        titleLabel.alignment = .center
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(titleLabel)
+        NSLayoutConstraint.activate([
+            titleLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 4),
+        ])
+        refreshLabel()
+    }
+
+    private func refreshLabel() {
+        installLabelIfNeeded()
+        titleLabel.stringValue = isRecording ? "按下快捷键…" : binding.display
+        titleLabel.textColor = isRecording ? .controlAccentColor : .labelColor
         needsDisplay = true
+    }
+
+    /// 只拦「⌘ / ⇧⌘」这类必然被系统或前台应用占用的组合；带 ⌥ ⌃ 的组合基本不冲突
+    private static func rejectionReason(for event: NSEvent) -> String? {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard !flags.contains(.option), !flags.contains(.control) else { return nil }
+
+        // Q W H M ` Tab Space 与 ⇧⌘3/4/5/6 截图
+        let reserved: Set<UInt16> = [12, 13, 4, 46, 50, 48, 49, 20, 21, 23, 22]
+        guard reserved.contains(event.keyCode) else { return nil }
+        return "⌘Q、⌘W、⌘Tab 等系统快捷键不能用作全局快捷键，建议加上 ⌥"
     }
 }

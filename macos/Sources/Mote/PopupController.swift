@@ -48,11 +48,11 @@ final class PopupController {
         panel.maxSize = NSSize(width: 900, height: 800)
 
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 53 {
-                self?.hide()
-                return nil
-            }
-            return event
+            // 只有弹窗可见时才吞 Esc，否则其它窗口的 Esc（如设置窗取消）会被一并吃掉
+            // 只有弹窗自己拿着焦点时才吞 Esc，避免抢走设置窗等其它窗口的取消键
+            guard let self, self.isVisible, self.panel.isKeyWindow, event.keyCode == 53 else { return event }
+            self.hide()
+            return nil
         }
 
         // 点击其他应用或窗口时自动收起，但不抢回焦点。

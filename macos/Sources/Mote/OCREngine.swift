@@ -21,12 +21,12 @@ enum OCREngine {
     }
 
     static var hasScreenPermission: Bool {
-        CGPreflightScreenCaptureAccess()
+        // CGPreflight 在刚勾选后是旧值，交给子进程查询；不能靠窗口标题探测，
+        // 新版 macOS 无权限时也会返回带标题的窗口，会把未授权误判成已授权。
+        PermissionProbe.screen()
     }
 
-    static func requestScreenPermission() {
-        _ = CGRequestScreenCaptureAccess()
-    }
+    /// 有屏幕录制权限时窗口标题才对其他进程可见，借此实时判断
 
     static func captureInteractive(completion: @escaping (Result<String, Error>) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {

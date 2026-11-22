@@ -18,6 +18,7 @@ final class PopupViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var didCopy = false
     @Published var focusToken = 0
+    @Published var runID = 0
 
     var primaryText: String {
         results.first(where: { !$0.text.isEmpty })?.text ?? ""
@@ -42,17 +43,18 @@ final class PopupViewModel: ObservableObject {
         task?.cancel()
         errorMessage = nil
         didCopy = false
+        runID += 1
 
         let config = store.config
         let apiKey = store.apiKey
         let baiduKey = store.baiduKey
 
         var planned: [ProviderResult] = []
-        if config.llmEnabled {
-            planned.append(ProviderResult(id: "llm", title: Self.llmTitle(config)))
-        }
         if config.baiduEnabled {
             planned.append(ProviderResult(id: "baidu", title: "百度翻译"))
+        }
+        if config.llmEnabled {
+            planned.append(ProviderResult(id: "llm", title: Self.llmTitle(config)))
         }
 
         guard !planned.isEmpty else {

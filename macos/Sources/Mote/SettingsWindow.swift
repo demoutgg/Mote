@@ -1,0 +1,1124 @@
+// 设置窗口（纯 AppKit）：分页编辑通用、服务、翻译与历史。
+// 除开机自启（切换即写系统登录项、未保存关窗时回滚）外，保存前都不写入磁盘。
+import AppKit
+
+private final class SettingsWindow: NSWindow {
+    override func cancelOperation(_ sender: Any?) {
+        close()
+    }
+
+}
+
+final class SettingsWindowController: NSObject, NSWindowDelegate {
+    private let store: SettingsStore
+    private let history: HistoryStore
+    private let service = TranslationService()
+    private var window: NSWindow?
+    /// 每次重建窗口自增，异步回调据此判断结果是否还属于当前这扇窗
+    private var session = 0
+    private var panes: [NSView] = []
+    private let container = NSView()
+
+    private var draft = AppConfig()
+    private var draftKey = ""
+    private var draftBaiduKey = ""
+
+    private var tabControl: NSSegmentedControl!
+    private let warningLabel = NSTextField(labelWithString: "")
+    private let saveButton = NSButton()
+    private let cancelButton = NSButton()
+    /// 历史分页专用：底部条只保留「清空」
+    private let footerClearButton = NSButton()
+    private var savedHintWorkItem: DispatchWorkItem?
+    /// 上次保存时的开机自启状态，未保存就关窗时用它回滚
+    private var savedLaunchAtLogin = false
+
+    // 权限
+    private var permissionStatus: [PermissionKind: NSTextField] = [:]
+    private var permissionButtons: [PermissionKind: NSButton] = [:]
+
+    // 通用
+    private var recorders: [RecorderView] = []
+    private var widthSlider: NSSlider!
+    private var widthValue: NSTextField!
+    private var heightSlider: NSSlider!
+    private var heightValue: NSTextField!
+    private var statusIconField: NSTextField!
+    private var statusIconPopup: NSPopUpButton!
+    private var statusIconItems: [String] = []
+
+    // 服务
+    private var baiduSwitch: NSSwitch!
+    private var baiduAppIDField: NSTextField!
+    private var baiduKeyField: NSSecureTextField!
+    private var baiduDetailRows: [NSView] = []
+    private var baiduResultLabel: NSTextField!
+    private var baiduTestButton: NSButton!
+    private var llmSwitch: NSSwitch!
+    private var endpointField: NSTextField!
+    private var presetPopup: NSPopUpButton!
+    private var apiKeyField: NSSecureTextField!
+    private var modelField: NSTextField!
+    private var modelPopup: NSPopUpButton!
+    private var llmDetailRows: [NSView] = []
+    private var llmResultLabel: NSTextField!
+    private var llmTestButton: NSButton!
+    private var fetchModelsButton: NSButton!
+
+    // 翻译
+    private var languagePopup: NSPopUpButton!
+    private var autoCopySwitch: NSSwitch!
+    private var temperatureSlider: NSSlider!
+    private var temperatureValue: NSTextField!
+    private var promptTextView: NSTextView!
+    private var promptToggleButton: NSButton!
+    private var promptRows: [NSView] = []
+
+    var onStatusIconPreview: ((String) -> Void)?
+
+    init(store: SettingsStore, history: HistoryStore) {
+        self.store = store
+        self.history = history
+        super.init()
+    }
+
+    /// 开发用：直接打开指定分页（0 通用 / 1 服务 / 2 翻译 / 3 历史），便于截图核对样式
+    func show(pane index: Int) {
+        show()
+        guard let tabControl, index >= 0, index < panes.count else { return }
+        tabControl.selectedSegment = index
+        selectPane(index)
+    }
+
+    func show() {
+        if let window {
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+            AppActivation.activate(window)
+            return
+        }
+
+        draft = store.config
+        draftKey = store.apiKey
+        draftBaiduKey = store.baiduKey
+        savedLaunchAtLogin = LaunchAtLogin.isEnabled
+
+        let window = SettingsWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 620),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Mote 设置"
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.contentView = makeContentView()
+        window.center()
+        self.window = window
+        session += 1
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        AppActivation.activate(window)
+        validate()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        savedHintWorkItem?.cancel()
+        savedHintWorkItem = nil
+        // 开机自启切换即写系统登录项，「取消」或未保存关窗要退回上次保存的状态
+        if LaunchAtLogin.isEnabled != savedLaunchAtLogin {
+            try? LaunchAtLogin.set(savedLaunchAtLogin)
+        }
+        (notification.object as? NSWindow)?.contentView = nil
+        window = nil
+        releaseViews()
+        onStatusIconPreview?(store.config.statusIcon)
+        AppActivation.restoreAccessoryPolicy()
+    }
+
+    /// 关闭时清空所有视图引用，避免 AppKit 控件常驻内存。
+    private func releaseViews() {
+        container.subviews.forEach { $0.removeFromSuperview() }
+        panes = []
+        recorders = []
+        tabControl = nil
+        widthSlider = nil
+        widthValue = nil
+        heightSlider = nil
+        heightValue = nil
+        statusIconField = nil
+        statusIconPopup = nil
+        statusIconItems = []
+        baiduSwitch = nil
+        baiduAppIDField = nil
+        baiduKeyField = nil
+        baiduDetailRows = []
+        baiduResultLabel = nil
+        baiduTestButton = nil
+        llmSwitch = nil
+        endpointField = nil
+        presetPopup = nil
+        apiKeyField = nil
+        modelField = nil
+        modelPopup = nil
+        llmDetailRows = []
+        llmResultLabel = nil
+        llmTestButton = nil
+        fetchModelsButton = nil
+        languagePopup = nil
+        autoCopySwitch = nil
+        temperatureSlider = nil
+        temperatureValue = nil
+        promptTextView = nil
+        promptToggleButton = nil
+        promptRows = []
+        permissionStatus = [:]
+        permissionButtons = [:]
+    }
+
+    // MARK: - 窗口骨架
+
+    private func makeContentView() -> NSView {
+        let content = NSView()
+        content.wantsLayer = true
+
+        tabControl = NSSegmentedControl(
+            labels: ["通用", "服务", "翻译", "历史"],
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(tabChanged(_:))
+        )
+        tabControl.selectedSegment = 0
+        for index in 0..<tabControl.segmentCount {
+            tabControl.setWidth(76, forSegment: index)
+        }
+        tabControl.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(tabControl)
+
+        container.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(container)
+
+        let separator = NSView()
+        separator.wantsLayer = true
+        separator.layer?.backgroundColor = NSColor.separatorColor
+            .withAlphaComponent(0.5)
+            .cgColor
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(separator)
+
+        warningLabel.font = .systemFont(ofSize: 11)
+        warningLabel.textColor = .systemOrange
+        warningLabel.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(warningLabel)
+
+        cancelButton.title = "取消"
+        cancelButton.target = self
+        cancelButton.action = #selector(cancel)
+        cancelButton.bezelStyle = .rounded
+        cancelButton.keyEquivalent = "\u{1b}"
+        cancelButton.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(cancelButton)
+
+        saveButton.title = "保存"
+        saveButton.target = self
+        saveButton.action = #selector(save)
+        saveButton.bezelStyle = .rounded
+        saveButton.keyEquivalent = "s"
+        saveButton.keyEquivalentModifierMask = [.command]
+        saveButton.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(saveButton)
+
+        footerClearButton.title = "清空"
+        footerClearButton.bezelStyle = .rounded
+        footerClearButton.target = self
+        footerClearButton.action = #selector(clearHistoryFromFooter)
+        footerClearButton.isHidden = true
+        footerClearButton.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(footerClearButton)
+
+        NSLayoutConstraint.activate([
+            tabControl.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
+            tabControl.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+
+            container.topAnchor.constraint(equalTo: tabControl.bottomAnchor, constant: 10),
+            container.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            container.bottomAnchor.constraint(equalTo: separator.topAnchor),
+
+            separator.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            separator.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -52),
+            separator.heightAnchor.constraint(equalToConstant: 1),
+
+            warningLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+            warningLabel.centerYAnchor.constraint(equalTo: saveButton.centerYAnchor),
+            warningLabel.trailingAnchor.constraint(lessThanOrEqualTo: cancelButton.leadingAnchor, constant: -12),
+
+            saveButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+            saveButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14),
+
+            cancelButton.trailingAnchor.constraint(equalTo: saveButton.leadingAnchor, constant: -10),
+            cancelButton.centerYAnchor.constraint(equalTo: saveButton.centerYAnchor),
+
+            footerClearButton.trailingAnchor.constraint(equalTo: saveButton.trailingAnchor),
+            footerClearButton.centerYAnchor.constraint(equalTo: saveButton.centerYAnchor),
+        ])
+
+        panes = [
+            makeGeneralPane(),
+            makeServicesPane(),
+            makeTranslationPane(),
+            HistoryPane(store: history, showsHeader: false),
+        ]
+        selectPane(0)
+        return content
+    }
+
+    @objc private func tabChanged(_ sender: NSSegmentedControl) {
+        selectPane(sender.selectedSegment)
+    }
+
+    private func selectPane(_ index: Int) {
+        guard index >= 0, index < panes.count else { return }
+        panes.forEach { $0.removeFromSuperview() }
+        let pane = panes[index]
+        pane.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(pane)
+        NSLayoutConstraint.activate([
+            pane.topAnchor.constraint(equalTo: container.topAnchor),
+            pane.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            pane.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            pane.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+
+        // 历史分页改不了设置：底部条只留「清空」，取消/保存隐藏
+        let isHistory = pane is HistoryPane
+        footerClearButton.isHidden = !isHistory
+        cancelButton.isHidden = isHistory
+        saveButton.isHidden = isHistory
+        warningLabel.isHidden = isHistory
+
+        container.layoutSubtreeIfNeeded()
+        resizeWindow()
+        (pane as? FormPane)?.scrollToTop()
+    }
+
+    /// 各分页统一高度（以历史列表一屏为准），切换分页时窗口不跳动；放不下的内容在分页内滚动
+    private static let fixedWindowHeight: CGFloat = 780
+
+    private func resizeWindow() {
+        guard let window else { return }
+        let available = (window.screen ?? NSScreen.main)?.visibleFrame.height ?? 900
+        let height = min(Self.fixedWindowHeight, available - 60)
+        guard abs(window.frame.height - height) > 1 else { return }
+        var frame = window.frame
+        frame.origin.y += frame.height - height
+        frame.size.height = height
+        window.setFrame(frame, display: true)
+    }
+
+    // MARK: - 通用
+
+    private enum ControlTag {
+        static let popupWidth = 101
+        static let popupHeight = 102
+        static let temperature = 103
+    }
+
+    private func makeGeneralPane() -> NSView {
+        let pane = FormPane()
+
+        // 权限放最前：没授权时这里是唯一的常驻入口
+        pane.addTitle("权限")
+        var permissionRows: [NSView] = []
+        for (index, kind) in PermissionKind.allCases.enumerated() {
+            let granted = kind.isGranted
+            let status = FormRow.valueLabel(granted ? "已授权" : "未授权", width: 56)
+            status.textColor = granted ? .systemGreen : .systemOrange
+            let button = FormRow.button(
+                granted ? "已授权" : "授权",
+                target: self,
+                action: #selector(grantPermission(_:))
+            )
+            button.tag = index
+            button.isHidden = granted
+            permissionStatus[kind] = status
+            permissionButtons[kind] = button
+
+            let spacer = NSView()
+            spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            let group = FormRow.trailing([spacer, status, button])
+            permissionRows.append(
+                FormRow.make(title: kind.title, detail: kind.detail, accessory: group)
+            )
+        }
+        pane.addCard(permissionRows)
+
+        pane.addTitle("启动")
+        let launchSwitch = FormRow.switchButton(
+            isOn: LaunchAtLogin.isEnabled,
+            target: self,
+            action: #selector(launchToggled(_:))
+        )
+        pane.addCard([
+            FormRow.make(title: "开机自动启动", accessory: launchSwitch),
+            FormRow.noteRow("登录时自动启动 Mote，下次登录生效；移动应用后需要重新勾选一次。"),
+        ])
+
+        pane.addTitle("快捷键")
+        var shortcutRows: [NSView] = []
+        for (index, action) in ShortcutAction.allCases.enumerated() {
+            let recorder = RecorderView()
+            recorder.binding = draft.binding(for: action)
+            recorder.onChange = { [weak self] binding in
+                guard let self else { return }
+                self.draft.setBinding(binding, for: action)
+                self.validate()
+            }
+            recorder.onReject = { [weak self] message in
+                self?.flashWarning(message)
+            }
+            recorder.translatesAutoresizingMaskIntoConstraints = false
+            recorder.widthAnchor.constraint(equalToConstant: 96).isActive = true
+            recorder.heightAnchor.constraint(equalToConstant: 24).isActive = true
+            recorders.append(recorder)
+
+            let reset = NSButton(
+                image: NSImage(
+                    systemSymbolName: "arrow.counterclockwise",
+                    accessibilityDescription: "恢复默认"
+                )!,
+                target: self,
+                action: #selector(resetShortcut(_:))
+            )
+            reset.isBordered = false
+            reset.tag = index
+            reset.toolTip = "恢复默认"
+
+            let accessory = NSStackView(views: [recorder, reset])
+            accessory.orientation = .horizontal
+            accessory.alignment = .centerY
+            accessory.spacing = 8
+            shortcutRows.append(
+                FormRow.make(title: action.title, detail: action.detail, accessory: accessory)
+            )
+        }
+        shortcutRows.append(
+            FormRow.noteRow("选中翻译需要辅助功能权限；截图功能需要屏幕录制权限。快捷键被占用时，点一下右侧按键重新录制即可。")
+        )
+        pane.addCard(shortcutRows)
+
+        pane.addTitle("弹窗")
+        widthSlider = NSSlider(value: draft.popupWidth, minValue: 460, maxValue: 900, target: self, action: #selector(sliderChanged(_:)))
+        widthSlider.tag = ControlTag.popupWidth
+        widthValue = FormRow.valueLabel("\(Int(draft.popupWidth)) pt")
+        heightSlider = NSSlider(value: draft.popupHeight, minValue: 340, maxValue: 800, target: self, action: #selector(sliderChanged(_:)))
+        heightSlider.tag = ControlTag.popupHeight
+        heightValue = FormRow.valueLabel("\(Int(draft.popupHeight)) pt")
+
+        pane.addCard([
+            sliderRow(title: "宽度", slider: widthSlider, value: widthValue),
+            sliderRow(title: "高度", slider: heightSlider, value: heightValue),
+            FormRow.noteRow("也可以在弹窗右下角拖动调整，位置会自动记住。"),
+        ])
+
+        pane.addTitle("外观")
+        statusIconPopup = FormRow.popup(width: 120)
+        // 菜单项与 statusIconItems 一一对应：自定义符号追加一项，末项是「显示“译”字」（空字符串）
+        var icons = AppConfig.statusIcons
+        if !draft.statusIcon.isEmpty && !icons.contains(draft.statusIcon) {
+            icons.append(draft.statusIcon)
+        }
+        icons.append("")
+        statusIconItems = icons
+        statusIconPopup.addItems(withTitles: icons.map { $0.isEmpty ? "显示“译”字" : statusName($0) })
+        // 每一项都带图标预览，避免只能靠名字猜是哪个符号
+        for (index, item) in statusIconPopup.itemArray.enumerated() where index < icons.count {
+            item.image = statusIconMenuItemImage(for: icons[index])
+        }
+        statusIconPopup.selectItem(at: icons.firstIndex(of: draft.statusIcon) ?? icons.count - 1)
+        statusIconPopup.target = self
+        statusIconPopup.action = #selector(statusIconPicked(_:))
+
+        statusIconField = FormRow.textField(width: 220)
+        statusIconField.stringValue = draft.statusIcon
+        statusIconField.placeholderString = "custom.icon.name"
+        statusIconField.target = self
+        statusIconField.action = #selector(statusIconTyped(_:))
+
+        pane.addCard([
+            FormRow.make(title: "菜单栏图标", accessory: statusIconPopup),
+            FormRow.make(title: "自定义符号", accessory: statusIconField),
+            FormRow.noteRow("留空显示“译”字；支持任意 SF Symbols 名称。"),
+        ])
+
+        pane.addTitle("关于")
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+        let link = NSButton(title: "github.com/demoutgg/Mote", target: self, action: #selector(openRepo))
+        link.isBordered = false
+        link.contentTintColor = .linkColor
+        link.font = .systemFont(ofSize: 11)
+        pane.addCard([
+            FormRow.make(title: "Mote", accessory: valueText(version)),
+            linkRow(link),
+            FormRow.noteRow("翻译在本地发起，不经过 Mote 服务器；不收集遥测。"),
+        ])
+
+        updateIconPreview(draft.statusIcon)
+        return pane
+    }
+
+    private func sliderRow(title: String, slider: NSSlider, value: NSTextField) -> NSView {
+        slider.translatesAutoresizingMaskIntoConstraints = false
+        slider.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        let accessory = NSStackView(views: [slider, value])
+        accessory.orientation = .horizontal
+        accessory.alignment = .centerY
+        accessory.spacing = 10
+        return FormRow.make(title: title, accessory: accessory)
+    }
+
+    private func linkRow(_ button: NSButton) -> NSView {
+        let row = NSStackView(views: [button])
+        row.orientation = .horizontal
+        row.edgeInsets = NSEdgeInsets(top: 6, left: 14, bottom: 6, right: 14)
+        return row
+    }
+
+    private func valueText(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = .secondaryLabelColor
+        return label
+    }
+
+    // MARK: - 服务
+
+    private func makeServicesPane() -> NSView {
+        let pane = FormPane()
+
+        pane.addTitle("百度翻译")
+        baiduSwitch = FormRow.switchButton(
+            isOn: draft.baiduEnabled,
+            target: self,
+            action: #selector(baiduToggled(_:))
+        )
+        baiduAppIDField = FormRow.textField()
+        baiduAppIDField.stringValue = draft.baiduAppID
+        baiduKeyField = FormRow.secureField()
+        baiduKeyField.stringValue = draftBaiduKey
+        baiduResultLabel = resultLabel()
+        baiduTestButton = FormRow.button("测试百度翻译", target: self, action: #selector(testBaidu))
+
+        let baiduTestRow = FormRow.make(title: "连接测试", accessory: baiduTestButton)
+        let baiduLink = NSButton(title: "打开百度翻译开放平台", target: self, action: #selector(openBaidu))
+        baiduLink.isBordered = false
+        baiduLink.contentTintColor = .linkColor
+        baiduLink.font = .systemFont(ofSize: 11)
+        let baiduRows = [
+            FormRow.make(title: "启用百度翻译", accessory: baiduSwitch),
+            FormRow.make(title: "AppID", accessory: baiduAppIDField),
+            FormRow.make(title: "密钥", accessory: baiduKeyField),
+            baiduTestRow,
+            resultRow(baiduResultLabel),
+            linkRow(baiduLink),
+            FormRow.noteRow("密钥只保存在本机，不会上传。"),
+        ]
+        baiduDetailRows = Array(baiduRows.dropFirst())
+        pane.addCard(baiduRows)
+
+        pane.addTitle("AI 翻译（OpenAI 兼容）")
+        llmSwitch = FormRow.switchButton(
+            isOn: draft.llmEnabled,
+            target: self,
+            action: #selector(llmToggled(_:))
+        )
+        endpointField = FormRow.textField(width: 200)
+        endpointField.stringValue = draft.endpoint
+        endpointField.delegate = self
+        presetPopup = FormRow.popup(width: 96)
+        presetPopup.addItems(withTitles: ServicePreset.allCases.map(\.rawValue))
+        presetPopup.addItem(withTitle: "自定义")
+        presetPopup.selectItem(
+            withTitle: ServicePreset.detect(draft.endpoint)?.rawValue ?? "自定义"
+        )
+        presetPopup.target = self
+        presetPopup.action = #selector(presetChanged(_:))
+
+        apiKeyField = FormRow.secureField()
+        apiKeyField.stringValue = draftKey
+        modelField = FormRow.textField(width: 170)
+        modelField.stringValue = draft.model
+        modelField.delegate = self
+        fetchModelsButton = FormRow.button("获取模型", target: self, action: #selector(fetchModels))
+        modelPopup = FormRow.popup(width: 90)
+        modelPopup.isHidden = true
+        modelPopup.target = self
+        modelPopup.action = #selector(modelPicked(_:))
+        llmResultLabel = resultLabel()
+        llmTestButton = FormRow.button("测试连接", target: self, action: #selector(testLLM))
+
+        let endpointRow = FormRow.make(
+            title: "接口地址",
+            accessory: NSStackView(views: [endpointField, presetPopup])
+        )
+        let modelRow = FormRow.make(
+            title: "模型",
+            accessory: NSStackView(views: [modelField, fetchModelsButton, modelPopup])
+        )
+        let llmTestRow = FormRow.make(title: "连接测试", accessory: llmTestButton)
+        let llmRows = [
+            FormRow.make(title: "启用 AI 翻译", accessory: llmSwitch),
+            endpointRow,
+            FormRow.make(title: "API Key", accessory: apiKeyField),
+            modelRow,
+            llmTestRow,
+            resultRow(llmResultLabel),
+            FormRow.noteRow("API Key 只保存在本机，不会上传。"),
+        ]
+        llmDetailRows = Array(llmRows.dropFirst())
+        pane.addCard(llmRows)
+
+        setDetails(baiduDetailRows, enabled: draft.baiduEnabled)
+        setDetails(llmDetailRows, enabled: draft.llmEnabled)
+        return pane
+    }
+
+    private enum ServicePreset: String, CaseIterable {
+        case openAI = "OpenAI"
+        case deepSeek = "DeepSeek"
+        case ollama = "Ollama（本地）"
+        case lmStudio = "LM Studio（本地）"
+
+        var endpoint: String {
+            switch self {
+            case .openAI: return "https://api.openai.com/v1"
+            case .deepSeek: return "https://api.deepseek.com/v1"
+            case .ollama: return "http://127.0.0.1:11434/v1"
+            case .lmStudio: return "http://127.0.0.1:1234/v1"
+            }
+        }
+
+        var model: String {
+            switch self {
+            case .openAI: return "gpt-4o-mini"
+            case .deepSeek: return "deepseek-chat"
+            case .ollama: return "qwen2.5:7b"
+            case .lmStudio: return "local-model"
+            }
+        }
+
+        static func detect(_ endpoint: String) -> ServicePreset? {
+            let lower = endpoint.lowercased()
+            if lower.contains("api.openai.com") { return .openAI }
+            if lower.contains("api.deepseek.com") { return .deepSeek }
+            if lower.contains("11434") { return .ollama }
+            if lower.contains("1234") { return .lmStudio }
+            return nil
+        }
+    }
+
+    // MARK: - 翻译
+
+    private func makeTranslationPane() -> NSView {
+        let pane = FormPane()
+
+        pane.addTitle("语言")
+        languagePopup = FormRow.popup(width: 200)
+        languagePopup.addItems(withTitles: AppConfig.targetLanguages)
+        languagePopup.selectItem(withTitle: draft.targetLanguage)
+        autoCopySwitch = FormRow.switchButton(
+            isOn: draft.autoCopy,
+            target: self,
+            action: #selector(autoCopyToggled(_:))
+        )
+        pane.addCard([
+            FormRow.make(title: "目标语言", accessory: languagePopup),
+            FormRow.make(title: "翻译完成后自动复制译文", accessory: autoCopySwitch),
+        ])
+
+        pane.addTitle("AI 参数")
+        temperatureSlider = NSSlider(value: draft.temperature, minValue: 0, maxValue: 1, target: self, action: #selector(sliderChanged(_:)))
+        temperatureSlider.tag = ControlTag.temperature
+        temperatureValue = FormRow.valueLabel(String(format: "%.2f", draft.temperature))
+        pane.addCard([sliderRow(title: "随机性", slider: temperatureSlider, value: temperatureValue)])
+
+        let toggle = FormRow.button("展开", target: self, action: #selector(togglePrompt))
+        promptToggleButton = toggle
+        let toggleRow = FormRow.make(
+            title: "系统提示词",
+            detail: "发给模型的 system 内容，可自行调整",
+            accessory: toggle
+        )
+
+        promptTextView = NSTextView()
+        promptTextView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        promptTextView.isRichText = false
+        promptTextView.autoresizingMask = [.width]
+        promptTextView.textContainerInset = NSSize(width: 6, height: 6)
+        promptTextView.textContainer?.widthTracksTextView = true
+        promptTextView.textContainer?.containerSize = NSSize(
+            width: 0,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        promptTextView.string = draft.systemPrompt
+
+        let promptScroll = NSScrollView()
+        promptScroll.documentView = promptTextView
+        promptScroll.hasVerticalScroller = true
+        promptScroll.borderType = .bezelBorder
+        promptScroll.translatesAutoresizingMaskIntoConstraints = false
+        promptScroll.heightAnchor.constraint(equalToConstant: 220).isActive = true
+
+        let resetPrompt = FormRow.button("恢复默认", target: self, action: #selector(resetPrompt))
+        let resetRow = NSStackView(views: [
+            valueText("使用 {targetLang} 表示目标语言。"),
+            NSView(),
+            resetPrompt,
+        ])
+        resetRow.orientation = .horizontal
+        resetRow.edgeInsets = NSEdgeInsets(top: 6, left: 14, bottom: 8, right: 14)
+
+        let promptBody = NSStackView(views: [promptScroll])
+        promptBody.orientation = .vertical
+        promptBody.alignment = .leading
+        promptBody.spacing = 0
+        promptBody.edgeInsets = NSEdgeInsets(top: 2, left: 16, bottom: 8, right: 16)
+        promptBody.translatesAutoresizingMaskIntoConstraints = false
+        promptScroll.widthAnchor.constraint(equalTo: promptBody.widthAnchor, constant: -32).isActive = true
+        promptBody.isHidden = true
+        promptRows = [promptBody, resetRow]
+        resetRow.isHidden = true
+
+        pane.addCard([toggleRow, promptBody, resetRow])
+
+        return pane
+    }
+
+    // MARK: - 动作
+
+    @objc private func launchToggled(_ sender: NSSwitch) {
+        let enabled = sender.state == .on
+        do {
+            try LaunchAtLogin.set(enabled)
+        } catch {
+            sender.state = LaunchAtLogin.isEnabled ? .on : .off
+            let alert = NSAlert()
+            alert.messageText = "无法设置开机自启"
+            alert.informativeText = error.localizedDescription
+            if let window {
+                alert.beginSheetModal(for: window)
+            }
+        }
+    }
+
+    @objc private func sliderChanged(_ sender: NSSlider) {
+        switch sender.tag {
+        case ControlTag.popupWidth:
+            draft.popupWidth = sender.doubleValue
+            widthValue.stringValue = "\(Int(sender.doubleValue)) pt"
+        case ControlTag.popupHeight:
+            draft.popupHeight = sender.doubleValue
+            heightValue.stringValue = "\(Int(sender.doubleValue)) pt"
+        case ControlTag.temperature:
+            draft.temperature = sender.doubleValue
+            temperatureValue.stringValue = String(format: "%.2f", sender.doubleValue)
+        default:
+            break
+        }
+    }
+
+    @objc private func resetShortcut(_ sender: NSButton) {
+        let actions = ShortcutAction.allCases
+        guard sender.tag >= 0, sender.tag < actions.count else { return }
+        let action = actions[sender.tag]
+        draft.resetBinding(for: action)
+        recorders[sender.tag].binding = draft.binding(for: action)
+        recorders[sender.tag].needsDisplay = true
+        validate()
+    }
+
+    @objc private func statusIconPicked(_ sender: NSPopUpButton) {
+        let index = sender.indexOfSelectedItem
+        guard index >= 0 && index < statusIconItems.count else { return }
+        let icon = statusIconItems[index]
+        draft.statusIcon = icon
+        statusIconField.stringValue = icon
+        updateIconPreview(icon)
+    }
+
+    @objc private func statusIconTyped(_ sender: NSTextField) {
+        draft.statusIcon = sender.stringValue.trimmingCharacters(in: .whitespaces)
+        updateIconPreview(draft.statusIcon)
+    }
+
+    /// 下拉按钮本身已显示所选图标，这里只通知外部同步状态栏预览
+    private func updateIconPreview(_ icon: String) {
+        onStatusIconPreview?(icon)
+    }
+
+    /// 下拉列表里的图标预览；空字符串代表「显示“译”字」那一项。
+    private func statusIconMenuItemImage(for icon: String) -> NSImage? {
+        let size = NSSize(width: 16, height: 16)
+        guard !icon.isEmpty else {
+            let image = NSImage(size: size, flipped: false) { rect in
+                let text = "译" as NSString
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                    .foregroundColor: NSColor.labelColor,
+                ]
+                let textSize = text.size(withAttributes: attributes)
+                text.draw(
+                    at: NSPoint(
+                        x: rect.midX - textSize.width / 2,
+                        y: rect.midY - textSize.height / 2
+                    ),
+                    withAttributes: attributes
+                )
+                return true
+            }
+            image.isTemplate = true
+            return image
+        }
+        let configuration = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
+        let image = NSImage(systemSymbolName: icon, accessibilityDescription: nil)?
+            .withSymbolConfiguration(configuration)
+        image?.isTemplate = true
+        return image
+    }
+
+    private func statusName(_ icon: String) -> String {
+        switch icon {
+        case "sparkles": return "星光（双星）"
+        case "sparkle": return "星光（单星）"
+        default: return icon
+        }
+    }
+
+    @objc private func baiduToggled(_ sender: NSSwitch) {
+        draft.baiduEnabled = sender.state == .on
+        setDetails(baiduDetailRows, enabled: draft.baiduEnabled)
+        validate()
+    }
+
+    @objc private func llmToggled(_ sender: NSSwitch) {
+        draft.llmEnabled = sender.state == .on
+        setDetails(llmDetailRows, enabled: draft.llmEnabled)
+        validate()
+    }
+
+    private func setDetails(_ rows: [NSView], enabled: Bool) {
+        rows.forEach { setEnabled($0, enabled) }
+    }
+
+    private func setEnabled(_ view: NSView, _ enabled: Bool) {
+        if let control = view as? NSControl {
+            control.isEnabled = enabled
+        }
+        view.subviews.forEach { setEnabled($0, enabled) }
+    }
+
+    @objc private func presetChanged(_ sender: NSPopUpButton) {
+        let title = sender.titleOfSelectedItem ?? ""
+        guard let preset = ServicePreset(rawValue: title) else { return }
+        endpointField.stringValue = preset.endpoint
+        modelField.stringValue = preset.model
+    }
+
+    @objc private func modelPicked(_ sender: NSPopUpButton) {
+        // 第 0 项是「可选 N 个」占位，选中它不能当模型名写进输入框
+        guard sender.indexOfSelectedItem > 0, let title = sender.titleOfSelectedItem else { return }
+        modelField.stringValue = title
+    }
+
+    @objc private func autoCopyToggled(_ sender: NSSwitch) {
+        draft.autoCopy = sender.state == .on
+    }
+
+    @objc private func togglePrompt(_ sender: NSButton) {
+        let collapsing = promptRows.first?.isHidden == false
+        promptRows.forEach { $0.isHidden = collapsing }
+        sender.title = collapsing ? "展开" : "收起"
+        // 展开/收起改变了内容高度，窗口跟着伸缩
+        guard panes.count > 2 else { return }
+        container.layoutSubtreeIfNeeded()
+        resizeWindow()
+    }
+
+    @objc private func resetPrompt() {
+        promptTextView.string = AppConfig.defaultPrompt
+    }
+
+    @objc private func openRepo() {
+        NSWorkspace.shared.open(URL(string: "https://github.com/demoutgg/Mote")!)
+    }
+
+    @objc private func openBaidu() {
+        NSWorkspace.shared.open(URL(string: "https://fanyi-api.baidu.com/")!)
+    }
+
+    /// 测试结果单独占一行，宽出一行也不会被按钮挤掉
+    private func resultLabel() -> NSTextField {
+        let label = NSTextField(labelWithString: "")
+        label.font = .systemFont(ofSize: 11)
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = 2
+        label.isHidden = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.widthAnchor.constraint(equalToConstant: 440).isActive = true
+        return label
+    }
+
+    private func resultRow(_ label: NSTextField) -> NSView {
+        let wrapper = NSStackView(views: [label])
+        wrapper.orientation = .vertical
+        wrapper.alignment = .leading
+        wrapper.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 14)
+        return wrapper
+    }
+
+    @objc private func testLLM() {
+        let config = collectConfig()
+        let key = apiKeyField.stringValue
+        llmTestButton.isEnabled = false
+        llmResultLabel.isHidden = false
+        llmResultLabel.stringValue = "测试中…"
+        llmResultLabel.textColor = .secondaryLabelColor
+        let service = self.service
+        let session = self.session
+        Task { @MainActor [weak self] in
+            let start = Date()
+            var message = ""
+            var color = NSColor.secondaryLabelColor
+            do {
+                let output = try await service.translate(
+                    text: "Hello",
+                    config: config,
+                    apiKey: key
+                ) { _ in }
+                let ms = Int(Date().timeIntervalSince(start) * 1000)
+                message = "连接成功 · \(ms) ms · 返回：\(output.prefix(20))"
+                color = .systemGreen
+            } catch {
+                message = error.localizedDescription
+                color = .systemRed
+            }
+            // 关窗后控件被 releaseViews() 置空、重开又是新窗口，session 与可选绑定都要过
+            guard let self, self.window != nil, self.session == session,
+                  let label = self.llmResultLabel,
+                  let button = self.llmTestButton else { return }
+            label.stringValue = message
+            label.textColor = color
+            button.isEnabled = true
+        }
+    }
+
+    @objc private func testBaidu() {
+        let config = collectConfig()
+        let secret = baiduKeyField.stringValue
+        baiduTestButton.isEnabled = false
+        baiduResultLabel.isHidden = false
+        baiduResultLabel.stringValue = "测试中…"
+        baiduResultLabel.textColor = .secondaryLabelColor
+        let service = self.service
+        let session = self.session
+        Task { @MainActor [weak self] in
+            let start = Date()
+            var message = ""
+            var color = NSColor.secondaryLabelColor
+            do {
+                let output = try await service.translateBaidu(
+                    text: "Hello",
+                    config: config,
+                    secret: secret
+                )
+                let ms = Int(Date().timeIntervalSince(start) * 1000)
+                message = "连接成功 · \(ms) ms · 返回：\(output.prefix(20))"
+                color = .systemGreen
+            } catch {
+                message = error.localizedDescription
+                color = .systemRed
+            }
+            guard let self, self.window != nil, self.session == session,
+                  let label = self.baiduResultLabel,
+                  let button = self.baiduTestButton else { return }
+            label.stringValue = message
+            label.textColor = color
+            button.isEnabled = true
+        }
+    }
+
+    @objc private func fetchModels() {
+        let config = collectConfig()
+        let key = apiKeyField.stringValue
+        fetchModelsButton.isEnabled = false
+        let service = self.service
+        let session = self.session
+        Task { @MainActor [weak self] in
+            var models: [String] = []
+            var failure: String?
+            do {
+                models = try await service.fetchModels(config: config, apiKey: key)
+            } catch {
+                failure = error.localizedDescription
+            }
+            // 关窗后控件被 releaseViews() 置空、重开又是新窗口，session 与可选绑定都要过
+            guard let self, self.window != nil, self.session == session,
+                  let button = self.fetchModelsButton,
+                  let label = self.llmResultLabel,
+                  let popup = self.modelPopup else { return }
+            button.isEnabled = true
+            if let failure {
+                label.isHidden = false
+                label.stringValue = failure
+                label.textColor = .systemRed
+                return
+            }
+            if !config.model.isEmpty && !models.contains(config.model) {
+                models.insert(config.model, at: 0)
+            }
+            popup.removeAllItems()
+            popup.addItem(withTitle: "可选 \(models.count) 个")
+            popup.addItems(withTitles: models)
+            popup.isHidden = false
+        }
+    }
+
+    // MARK: - 保存
+
+    private func collectConfig() -> AppConfig {
+        var config = draft
+        config.endpoint = endpointField?.stringValue ?? draft.endpoint
+        config.model = modelField?.stringValue ?? draft.model
+        config.baiduAppID = baiduAppIDField?.stringValue ?? draft.baiduAppID
+        config.temperature = temperatureSlider?.doubleValue ?? draft.temperature
+        config.systemPrompt = promptTextView?.string ?? draft.systemPrompt
+        config.llmEnabled = llmSwitch?.state == .on
+        config.baiduEnabled = baiduSwitch?.state == .on
+        config.autoCopy = autoCopySwitch?.state == .on
+        config.targetLanguage =
+            languagePopup?.titleOfSelectedItem ?? draft.targetLanguage
+        config.statusIcon = statusIconField?.stringValue ?? draft.statusIcon
+        config.popupWidth = widthSlider?.doubleValue ?? draft.popupWidth
+        config.popupHeight = heightSlider?.doubleValue ?? draft.popupHeight
+        return config
+    }
+
+    @objc private func save() {
+        let config = collectConfig()
+        store.config = config
+        store.apiKey = apiKeyField.stringValue
+        store.baiduKey = baiduKeyField.stringValue
+        store.save()
+        onStatusIconPreview?(config.statusIcon)
+        // 保存后留在页面上继续调整，用底部提示代替关窗
+        draft = config
+        draftKey = store.apiKey
+        draftBaiduKey = store.baiduKey
+        savedLaunchAtLogin = LaunchAtLogin.isEnabled
+        showSavedHint()
+    }
+
+    /// 临时提示（如快捷键被拒），2.4s 后回到常规校验文案
+    private func flashWarning(_ message: String) {
+        savedHintWorkItem?.cancel()
+        warningLabel.textColor = .systemOrange
+        warningLabel.stringValue = message
+        warningLabel.isHidden = false
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.savedHintWorkItem = nil
+            self.validate()
+        }
+        savedHintWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4, execute: item)
+    }
+
+    private func showSavedHint() {
+        savedHintWorkItem?.cancel()
+        warningLabel.textColor = .systemGreen
+        warningLabel.stringValue = "已保存"
+        warningLabel.isHidden = false
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.savedHintWorkItem = nil
+            self.validate()
+        }
+        savedHintWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: item)
+    }
+
+    @objc private func cancel() {
+        window?.close()
+    }
+
+    @objc private func grantPermission(_ sender: NSButton) {
+        let kinds = PermissionKind.allCases
+        guard sender.tag >= 0, sender.tag < kinds.count else { return }
+        // 和授权引导窗走同一条流程：登记系统权限、打开设置、贴浮条、轮询到授权自动收
+        PermissionGuideController.shared.guide(kinds[sender.tag])
+    }
+
+    /// 用户去系统设置勾选完回到 Mote，窗口重新获得焦点时刷新两行状态
+    private func refreshPermissions() {
+        for kind in PermissionKind.allCases {
+            let granted = kind.isGranted
+            permissionStatus[kind]?.stringValue = granted ? "已授权" : "未授权"
+            permissionStatus[kind]?.textColor = granted ? .systemGreen : .systemOrange
+            permissionButtons[kind]?.title = "授权"
+            permissionButtons[kind]?.isHidden = granted
+        }
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        refreshPermissions()
+    }
+
+    @objc private func clearHistoryFromFooter() {
+        (panes.first { $0 is HistoryPane } as? HistoryPane)?.confirmClear()
+    }
+
+    private var shortcutConflict: Bool {
+        let signatures = ShortcutAction.allCases.map { action -> String in
+            let binding = draft.binding(for: action)
+            return "\(binding.keyCode)-\(binding.modifiers)"
+        }
+        return Set(signatures).count != signatures.count
+    }
+
+    private func validate() {
+        // 用户又改了东西，「已保存」提示立即让位给校验结果
+        savedHintWorkItem?.cancel()
+        savedHintWorkItem = nil
+        warningLabel.textColor = .systemOrange
+        let noService = draft.llmEnabled == false && draft.baiduEnabled == false
+        let conflict = shortcutConflict
+        let endpoint = (endpointField?.stringValue ?? draft.endpoint)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = (modelField?.stringValue ?? draft.model)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let missingEndpoint = draft.llmEnabled && (endpoint.isEmpty || model.isEmpty)
+        if noService {
+            warningLabel.stringValue = "至少启用一个翻译服务"
+        } else if missingEndpoint {
+            warningLabel.stringValue = "启用 AI 服务需要填写接口地址与模型"
+        } else if conflict {
+            warningLabel.stringValue = "存在重复快捷键"
+        } else {
+            warningLabel.stringValue = ""
+        }
+        warningLabel.isHidden = warningLabel.stringValue.isEmpty
+        // 两个服务都关、或 AI 服务缺地址/模型时都不能保存，否则存下去也没有可用的翻译能力
+        saveButton.isEnabled = !conflict && !noService && !missingEndpoint
+    }
+}
+
+extension SettingsWindowController: NSTextFieldDelegate {
+    /// 接口地址与模型是自由输入，边打字边重算校验，不等失焦
+    func controlTextDidChange(_ notification: Notification) {
+        guard let field = notification.object as? NSTextField,
+              field === endpointField || field === modelField else { return }
+        validate()
+    }
+}
+
