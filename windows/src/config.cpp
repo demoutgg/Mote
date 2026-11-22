@@ -209,6 +209,44 @@ void LoadConfig() {
             if (root.HasKey(L"temperature")) {
                 g_config.temperature = root.GetNamedNumber(L"temperature");
             }
+            if (root.HasKey(L"autoCopy")) {
+                g_config.autoCopy = root.GetNamedBoolean(L"autoCopy");
+            }
+            if (root.HasKey(L"popupPositioned")) {
+                g_config.popupPositioned = root.GetNamedBoolean(L"popupPositioned");
+            }
+            if (root.HasKey(L"popupX")) {
+                g_config.popupX = static_cast<int>(root.GetNamedNumber(L"popupX"));
+            }
+            if (root.HasKey(L"popupY")) {
+                g_config.popupY = static_cast<int>(root.GetNamedNumber(L"popupY"));
+            }
+            if (root.HasKey(L"popupWidth")) {
+                g_config.popupWidth = static_cast<int>(root.GetNamedNumber(L"popupWidth"));
+            }
+            if (root.HasKey(L"popupHeight")) {
+                g_config.popupHeight = static_cast<int>(root.GetNamedNumber(L"popupHeight"));
+            }
+            const auto hotkeyInput = JsonString(root, L"hotkeyInput");
+            if (!hotkeyInput.empty()) {
+                g_config.hotkeyInput = hotkeyInput;
+            }
+            const auto hotkeySelection = JsonString(root, L"hotkeySelection");
+            if (!hotkeySelection.empty()) {
+                g_config.hotkeySelection = hotkeySelection;
+            }
+            const auto hotkeyClipboard = JsonString(root, L"hotkeyClipboard");
+            if (!hotkeyClipboard.empty()) {
+                g_config.hotkeyClipboard = hotkeyClipboard;
+            }
+            const auto hotkeyScreenshot = JsonString(root, L"hotkeyScreenshot");
+            if (!hotkeyScreenshot.empty()) {
+                g_config.hotkeyScreenshot = hotkeyScreenshot;
+            }
+            const auto hotkeyOcr = JsonString(root, L"hotkeyOcr");
+            if (!hotkeyOcr.empty()) {
+                g_config.hotkeyOcr = hotkeyOcr;
+            }
         } catch (...) {
         }
     }
@@ -232,6 +270,10 @@ void LoadConfig() {
     }
 }
 
+std::wstring DefaultSystemPrompt() {
+    return kDefaultPrompt;
+}
+
 void SaveConfig() {
     using namespace winrt::Windows::Data::Json;
 
@@ -244,6 +286,17 @@ void SaveConfig() {
     root.SetNamedValue(L"llmEnabled", JsonValue::CreateBooleanValue(g_config.llmEnabled));
     root.SetNamedValue(L"baiduEnabled", JsonValue::CreateBooleanValue(g_config.baiduEnabled));
     root.SetNamedValue(L"temperature", JsonValue::CreateNumberValue(g_config.temperature));
+    root.SetNamedValue(L"autoCopy", JsonValue::CreateBooleanValue(g_config.autoCopy));
+    root.SetNamedValue(L"popupPositioned", JsonValue::CreateBooleanValue(g_config.popupPositioned));
+    root.SetNamedValue(L"popupX", JsonValue::CreateNumberValue(g_config.popupX));
+    root.SetNamedValue(L"popupY", JsonValue::CreateNumberValue(g_config.popupY));
+    root.SetNamedValue(L"popupWidth", JsonValue::CreateNumberValue(g_config.popupWidth));
+    root.SetNamedValue(L"popupHeight", JsonValue::CreateNumberValue(g_config.popupHeight));
+    root.SetNamedValue(L"hotkeyInput", JsonValue::CreateStringValue(winrt::hstring(g_config.hotkeyInput.c_str())));
+    root.SetNamedValue(L"hotkeySelection", JsonValue::CreateStringValue(winrt::hstring(g_config.hotkeySelection.c_str())));
+    root.SetNamedValue(L"hotkeyClipboard", JsonValue::CreateStringValue(winrt::hstring(g_config.hotkeyClipboard.c_str())));
+    root.SetNamedValue(L"hotkeyScreenshot", JsonValue::CreateStringValue(winrt::hstring(g_config.hotkeyScreenshot.c_str())));
+    root.SetNamedValue(L"hotkeyOcr", JsonValue::CreateStringValue(winrt::hstring(g_config.hotkeyOcr.c_str())));
 
     WriteUtf8(ConfigPath(), winrt::to_string(root.Stringify()));
     WriteCredential(L"Mote/AI", g_config.aiKey);

@@ -6,6 +6,7 @@
 #include <winrt/Windows.Foundation.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <iterator>
 #include <string>
 #include <thread>
@@ -34,8 +35,33 @@ HWND g_setBaiduCheck = nullptr;
 HWND g_setLanguage = nullptr;
 HWND g_setLaunchCheck = nullptr;
 
+HWND g_settingsTab = nullptr;
+HWND g_setPrompt = nullptr;
+HWND g_setAutoCopyCheck = nullptr;
+HWND g_setPreset = nullptr;
+HWND g_setModelCombo = nullptr;
+HWND g_setFetchModels = nullptr;
+HWND g_setPopupWidth = nullptr;
+HWND g_setPopupHeight = nullptr;
+HWND g_hotkeyButtons[5] = {};
+int g_recordingHotkey = 0;
+
 HWND g_historyWindow = nullptr;
 HWND g_historyList = nullptr;
+HWND g_historySearch = nullptr;
+std::wstring g_historyFilter;
+std::vector<int> g_historyVisible;   // 过滤后列表行对应的 History 下标
+
+HWND g_popupClose = nullptr;
+HWND g_popupHistory = nullptr;
+HWND g_popupSettings = nullptr;
+HWND g_popupTitle = nullptr;
+HWND g_popupSourceLabel = nullptr;
+HWND g_popupOutputLabel = nullptr;
+bool g_suppressAutoHide = false;
+
+// 设置页四个分页共用一个窗口，控件建好后按页显隐
+std::vector<HWND> g_pageControls[4];
 
 HFONT g_font = nullptr;
 HFONT g_boldFont = nullptr;
@@ -44,6 +70,7 @@ int g_generation = 0;
 bool g_translating = false;
 
 constexpr UINT kTrayMessage = WM_APP + 1;
+constexpr UINT WM_APP_MODEL_LIST = WM_APP + 20;
 constexpr int kHotkeyInput = 1;
 constexpr int kHotkeySelection = 2;
 constexpr int kHotkeyClipboard = 3;
@@ -72,9 +99,24 @@ enum : int {
     ID_SET_TEST_AI = 1111,
     ID_SET_TEST_BAIDU = 1112,
     ID_SET_LAUNCH = 1113,
+    ID_SET_TAB = 1114,
+    ID_SET_PROMPT = 1115,
+    ID_SET_PROMPT_RESET = 1116,
+    ID_SET_AUTOCOPY = 1117,
+    ID_SET_PRESET = 1118,
+    ID_SET_FETCH_MODELS = 1119,
+    ID_SET_POPUP_WIDTH = 1120,
+    ID_SET_POPUP_HEIGHT = 1121,
+    ID_SET_HOTKEY_BASE = 1130,   // 1130..1134 对应五个动作的录制按钮
+    ID_SET_OPEN_HISTORY = 1140,
+    ID_SET_CLEAR_HISTORY = 1141,
+
+    ID_TRAY_ABOUT = 1210,
 
     ID_HISTORY_LIST = 1201,
     ID_HISTORY_COPY = 1202,
+    ID_HISTORY_COPY_SOURCE = 1205,
+    ID_HISTORY_SEARCH = 1206,
     ID_HISTORY_CLEAR = 1203,
     ID_HISTORY_CLOSE = 1204,
 
@@ -101,6 +143,8 @@ LRESULT CALLBACK MessageWindowProc(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK PopupWindowProc(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK SettingsWindowProc(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK HistoryWindowProc(HWND, UINT, WPARAM, LPARAM);
+HWND CreateSettings(HINSTANCE instance);
+HWND CreateHistory(HINSTANCE instance);
 
 std::wstring GetText(HWND control) {
     const int length = GetWindowTextLengthW(control);
@@ -122,6 +166,152 @@ std::wstring Trim(std::wstring value) {
         ++start;
     }
     return value.substr(start);
+}
+
+
+// 热键按 "Ctrl+Alt+K" 这样的文本存配置，注册时再解析；解析和注册失败的项会汇总提示。
+struct HotkeySpec {
+    UINT modifiers = 0;
+    UINT key = 0;
+};
+
+const int kHotkeyIds[] = {
+    kHotkeyInput,
+    kHotkeySelection,
+    kHotkeyClipboard,
+    kHotkeyScreenshot,
+    kHotkeyOcr,
+};
+
+const wchar_t* HotkeyLabel(int id) {
+    switch (id) {
+    case kHotkeySelection: return L"选中翻译";
+    case kHotkeyClipboard: return L"剪贴翻译";
+    case kHotkeyScreenshot: return L"截图翻译";
+    case kHotkeyOcr: return L"截图 OCR";
+    default: return L"输入翻译";
+    }
+}
+
+std::wstring& HotkeyText(AppConfig& config, int id) {
+    switch (id) {
+    case kHotkeySelection: return config.hotkeySelection;
+    case kHotkeyClipboard: return config.hotkeyClipboard;
+    case kHotkeyScreenshot: return config.hotkeyScreenshot;
+    case kHotkeyOcr: return config.hotkeyOcr;
+    default: return config.hotkeyInput;
+    }
+}
+
+bool ParseHotkey(const std::wstring& text, HotkeySpec& spec) {
+    spec = {};
+    size_t start = 0;
+    while (start <= text.size()) {
+        const size_t plus = text.find(L'+', start);
+        const std::wstring token = Trim(text.substr(
+            start,
+            plus == std::wstring::npos ? std::wstring::npos : plus - start
+        ));
+        if (!token.empty()) {
+            if (_wcsicmp(token.c_str(), L"Ctrl") == 0 || _wcsicmp(token.c_str(), L"Control") == 0) {
+                spec.modifiers |= MOD_CONTROL;
+            } else if (_wcsicmp(token.c_str(), L"Alt") == 0) {
+                spec.modifiers |= MOD_ALT;
+            } else if (_wcsicmp(token.c_str(), L"Shift") == 0) {
+                spec.modifiers |= MOD_SHIFT;
+            } else if (_wcsicmp(token.c_str(), L"Win") == 0) {
+                spec.modifiers |= MOD_WIN;
+            } else if (token.size() == 1) {
+                wchar_t ch = token[0];
+                if (ch >= L'a' && ch <= L'z') {
+                    ch = static_cast<wchar_t>(ch - L'a' + L'A');
+                }
+                if ((ch >= L'A' && ch <= L'Z') || (ch >= L'0' && ch <= L'9')) {
+                    spec.key = static_cast<UINT>(ch);
+                } else {
+                    return false;
+                }
+            } else if (token.size() == 2 && (token[0] == L'F' || token[0] == L'f')
+                       && token[1] >= L'1' && token[1] <= L'9') {
+                spec.key = VK_F1 + static_cast<UINT>(token[1] - L'1');
+            } else {
+                return false;
+            }
+        }
+        if (plus == std::wstring::npos) {
+            break;
+        }
+        start = plus + 1;
+    }
+    return spec.key != 0 && spec.modifiers != 0;
+}
+
+std::wstring FormatHotkey(UINT modifiers, UINT key) {
+    std::wstring text;
+    if (modifiers & MOD_CONTROL) text += L"Ctrl+";
+    if (modifiers & MOD_ALT) text += L"Alt+";
+    if (modifiers & MOD_SHIFT) text += L"Shift+";
+    if (modifiers & MOD_WIN) text += L"Win+";
+    if (key >= VK_F1 && key <= VK_F9) {
+        text += L"F" + std::to_wstring(key - VK_F1 + 1);
+    } else if (key >= L'A' && key <= L'Z') {
+        text += static_cast<wchar_t>(key);
+    } else {
+        text += static_cast<wchar_t>(key);
+    }
+    return text;
+}
+
+// 返回空串表示可以接受，否则是要提示给用户的原因
+std::wstring HotkeyRejection(UINT modifiers, UINT key) {
+    if (modifiers == 0) {
+        return L"快捷键至少要带一个修饰键（Ctrl / Alt / Shift / Win）。";
+    }
+    if ((modifiers & (MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_WIN)) == 0) {
+        return L"快捷键至少要带一个修饰键（Ctrl / Alt / Shift / Win）。";
+    }
+    if (key == VK_F4 && (modifiers & MOD_ALT)) {
+        return L"Alt+F4 是关闭窗口的系统快捷键。";
+    }
+    if (key == VK_TAB && (modifiers & MOD_ALT)) {
+        return L"Alt+Tab 是切换窗口的系统快捷键。";
+    }
+    if (key == VK_ESCAPE && (modifiers & MOD_CONTROL)) {
+        return L"Ctrl+Esc 会打开开始菜单。";
+    }
+    if (key == VK_DELETE && (modifiers & (MOD_CONTROL | MOD_ALT)) == (MOD_CONTROL | MOD_ALT)) {
+        return L"Ctrl+Alt+Del 由系统保留。";
+    }
+    if (key == VK_F4 && (modifiers & MOD_CONTROL)) {
+        return L"Ctrl+F4 是关闭子窗口的系统快捷键。";
+    }
+    return {};
+}
+
+void UnregisterAllHotkeys() {
+    for (int id : kHotkeyIds) {
+        UnregisterHotKey(g_messageWindow, id);
+    }
+}
+
+// 返回注册失败的键位说明，空串表示全部成功
+std::wstring RegisterAllHotkeys() {
+    UnregisterAllHotkeys();
+    std::wstring failed;
+    for (int id : kHotkeyIds) {
+        HotkeySpec spec;
+        const std::wstring text = HotkeyText(Config(), id);
+        if (!ParseHotkey(text, spec)) {
+            if (!failed.empty()) failed += L"、";
+            failed += HotkeyLabel(id) + L"（" + text + L" 无法识别）";
+            continue;
+        }
+        if (!RegisterHotKey(g_messageWindow, id, spec.modifiers, spec.key)) {
+            if (!failed.empty()) failed += L"、";
+            failed += HotkeyLabel(id) + L"（" + text + L"）";
+        }
+    }
+    return failed;
 }
 
 void ApplyFont(HWND parent, HFONT font) {
@@ -360,8 +550,21 @@ void AddTrayIcon() {
     if (!g_trayIcon.hIcon) {
         g_trayIcon.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     }
-    wcscpy_s(g_trayIcon.szTip, L"Mote · Alt+D 选中翻译");
+    const std::wstring tip =
+        L"Mote · " + HotkeyText(Config(), kHotkeySelection) + L" 选中翻译";
+    wcscpy_s(g_trayIcon.szTip, tip.c_str());
     Shell_NotifyIconW(NIM_ADD, &g_trayIcon);
+}
+
+void UpdateTrayTip() {
+    if (!g_trayIcon.hWnd) {
+        return;
+    }
+    const std::wstring tip =
+        L"Mote · " + HotkeyText(Config(), kHotkeySelection) + L" 选中翻译";
+    wcscpy_s(g_trayIcon.szTip, tip.c_str());
+    g_trayIcon.uFlags = NIF_TIP;
+    Shell_NotifyIconW(NIM_MODIFY, &g_trayIcon);
 }
 
 void RemoveTrayIcon() {
@@ -393,10 +596,23 @@ void ShowPopup(const std::wstring& text, bool translate) {
     EnableWindow(g_translateButton, TRUE);
     SetWindowTextW(g_sourceEdit, text.c_str());
     SetWindowTextW(g_outputEdit, L"");
+    // 换一段原文后回到开头，避免沿用上一次的滚动位置
+    SendMessageW(g_sourceEdit, EM_SETSEL, 0, 0);
+    SendMessageW(g_sourceEdit, EM_SCROLLCARET, 0, 0);
     PopulateLanguages(g_languageCombo);
     UpdateStatus();
 
-    CenterWindow(g_popupWindow, 540, 470, -30);
+    const int width = std::clamp(Config().popupWidth, 480, 1200);
+    const int height = std::clamp(Config().popupHeight, 380, 900);
+    if (Config().popupPositioned) {
+        SetWindowPos(
+            g_popupWindow, HWND_TOPMOST,
+            Config().popupX, Config().popupY, width, height,
+            SWP_SHOWWINDOW
+        );
+    } else {
+        CenterWindow(g_popupWindow, width, height, -30);
+    }
     SetForegroundWindow(g_popupWindow);
     SetFocus(g_sourceEdit);
 
@@ -410,14 +626,21 @@ void ShowContextMenu() {
     GetCursorPos(&cursor);
 
     HMENU menu = CreatePopupMenu();
-    AppendMenuW(menu, MF_STRING, ID_TRAY_INPUT, L"输入翻译\tAlt+A");
-    AppendMenuW(menu, MF_STRING, ID_TRAY_SELECTION, L"选中翻译\tAlt+D");
-    AppendMenuW(menu, MF_STRING, ID_TRAY_CLIPBOARD, L"剪贴翻译\tAlt+V");
-    AppendMenuW(menu, MF_STRING, ID_TRAY_SCREENSHOT, L"截图翻译\tAlt+S");
-    AppendMenuW(menu, MF_STRING, ID_TRAY_OCR, L"截图 OCR\tShift+Alt+S");
+    auto item = [&](int id, const wchar_t* title, const std::wstring& hotkey) {
+        const std::wstring text = hotkey.empty()
+            ? std::wstring(title)
+            : std::wstring(title) + L"\t" + hotkey;
+        AppendMenuW(menu, MF_STRING, id, text.c_str());
+    };
+    item(ID_TRAY_INPUT, L"输入翻译", HotkeyText(Config(), kHotkeyInput));
+    item(ID_TRAY_SELECTION, L"选中翻译", HotkeyText(Config(), kHotkeySelection));
+    item(ID_TRAY_CLIPBOARD, L"剪贴翻译", HotkeyText(Config(), kHotkeyClipboard));
+    item(ID_TRAY_SCREENSHOT, L"截图翻译", HotkeyText(Config(), kHotkeyScreenshot));
+    item(ID_TRAY_OCR, L"截图 OCR", HotkeyText(Config(), kHotkeyOcr));
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, ID_TRAY_HISTORY, L"历史记录");
     AppendMenuW(menu, MF_STRING, ID_TRAY_SETTINGS, L"设置");
+    AppendMenuW(menu, MF_STRING, ID_TRAY_ABOUT, L"关于 Mote");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, ID_TRAY_EXIT, L"退出 Mote");
 
@@ -427,16 +650,38 @@ void ShowContextMenu() {
     DestroyMenu(menu);
 }
 
-void CopyHistoryEntry(int index) {
+// 列表经过筛选，行号不能直接当 History 下标用
+int SelectedHistoryIndex() {
+    if (!g_historyList) {
+        return -1;
+    }
+    const int row = static_cast<int>(SendMessageW(g_historyList, LB_GETCURSEL, 0, 0));
+    if (row < 0 || row >= static_cast<int>(g_historyVisible.size())) {
+        return -1;
+    }
+    return g_historyVisible[row];
+}
+
+void CopyHistoryEntry(int index, bool source) {
     if (index < 0 || index >= static_cast<int>(History().size())) {
         return;
     }
     const auto& entry = History()[index];
-    if (entry.results.empty()) {
+    if (source) {
+        if (entry.source.empty()) {
+            return;
+        }
+        SetClipboardText(entry.source);
+        ShowBalloon(L"已复制历史原文");
         return;
     }
-    SetClipboardText(entry.results.front().text);
-    ShowBalloon(L"已复制历史译文");
+    for (const auto& result : entry.results) {
+        if (result.ok && !result.text.empty()) {
+            SetClipboardText(result.text);
+            ShowBalloon(L"已复制历史译文");
+            return;
+        }
+    }
 }
 
 void RefreshHistoryWindow() {
@@ -444,16 +689,32 @@ void RefreshHistoryWindow() {
         return;
     }
     SendMessageW(g_historyList, LB_RESETCONTENT, 0, 0);
-    for (const auto& entry : History()) {
-        std::wstring line = L"[" + entry.time + L"]  " + entry.source;
-        if (!entry.results.empty()) {
-            line += L"  →  " + entry.results.front().text;
+    g_historyVisible.clear();
+
+    const std::wstring filter = Trim(g_historyFilter);
+    const auto& history = History();
+    for (int index = 0; index < static_cast<int>(history.size()); ++index) {
+        const auto& entry = history[index];
+        std::wstring first;
+        for (const auto& result : entry.results) {
+            if (result.ok && !result.text.empty()) {
+                first = result.text;
+                break;
+            }
+        }
+        std::wstring line = L"[" + entry.time + L"]  " + entry.source + L"  →  " + first;
+        if (entry.results.size() > 1) {
+            line += L"（另有 " + std::to_wstring(entry.results.size() - 1) + L" 个结果）";
         }
         std::replace(line.begin(), line.end(), L'\r', L' ');
         std::replace(line.begin(), line.end(), L'\n', L' ');
+        if (!filter.empty() && line.find(filter) == std::wstring::npos) {
+            continue;
+        }
         if (line.size() > 140) {
             line = line.substr(0, 140) + L"…";
         }
+        g_historyVisible.push_back(index);
         SendMessageW(
             g_historyList,
             LB_ADDSTRING,
@@ -465,33 +726,242 @@ void RefreshHistoryWindow() {
 
 void ShowHistoryWindow() {
     if (!g_historyWindow) {
-        return;
+        g_historyWindow = CreateHistory(g_instance);
+        if (!g_historyWindow) {
+            return;
+        }
+    }
+    if (g_historySearch) {
+        SetWindowTextW(g_historySearch, g_historyFilter.c_str());
     }
     RefreshHistoryWindow();
-    CenterWindow(g_historyWindow, 620, 460);
+    CenterWindow(g_historyWindow, 640, 540);
     SetForegroundWindow(g_historyWindow);
+}
+
+
+// 设置页用草稿保存，取消/关窗丢弃；快捷键录制也先写草稿
+std::wstring g_draftHotkeys[5];
+bool g_draftAutoCopy = false;
+int g_draftPopupWidth = 540;
+int g_draftPopupHeight = 470;
+
+void AddPageControl(int page, HWND control) {
+    if (control) {
+        g_pageControls[page].push_back(control);
+    }
+}
+
+void ShowSettingsPage(int page) {
+    if (!g_settingsTab) {
+        return;
+    }
+    for (int index = 0; index < 4; ++index) {
+        const int command = index == page ? SW_SHOW : SW_HIDE;
+        for (HWND control : g_pageControls[index]) {
+            ShowWindow(control, command);
+        }
+    }
+    TabCtrl_SetCurSel(g_settingsTab, page);
+}
+
+void RefreshHotkeyButtons() {
+    for (int i = 0; i < 5; ++i) {
+        if (g_hotkeyButtons[i]) {
+            const std::wstring text = (g_recordingHotkey == kHotkeyIds[i])
+                ? L"按下新的组合键…"
+                : (g_draftHotkeys[i].empty() ? L"未设置" : g_draftHotkeys[i]);
+            SetWindowTextW(g_hotkeyButtons[i], text.c_str());
+        }
+    }
+}
+
+void FinishHotkeyRecording() {
+    g_recordingHotkey = 0;
+    RefreshHotkeyButtons();
+    RegisterAllHotkeys();
+}
+
+LRESULT CALLBACK HotkeyRecorderProc(
+    HWND control,
+    UINT message,
+    WPARAM wParam,
+    LPARAM lParam,
+    UINT_PTR,
+    DWORD_PTR id
+) {
+    if (g_recordingHotkey == 0 || (message != WM_KEYDOWN && message != WM_SYSKEYDOWN)) {
+        return DefSubclassProc(control, message, wParam, lParam);
+    }
+
+    const int hotkeyId = static_cast<int>(id);
+    const UINT key = static_cast<UINT>(wParam);
+    if (key == VK_ESCAPE) {
+        FinishHotkeyRecording();
+        return 0;
+    }
+    // 只按下修饰键时继续等真正的键
+    if (key == VK_CONTROL || key == VK_MENU || key == VK_SHIFT
+        || key == VK_LWIN || key == VK_RWIN) {
+        return 0;
+    }
+    if (!((key >= L'A' && key <= L'Z') || (key >= L'0' && key <= L'9')
+          || (key >= VK_F1 && key <= VK_F12))) {
+        MessageBoxW(
+            g_settingsWindow,
+            L"只支持字母、数字和 F1–F12。",
+            L"Mote",
+            MB_OK | MB_ICONWARNING
+        );
+        return 0;
+    }
+
+    UINT modifiers = 0;
+    if (GetKeyState(VK_CONTROL) & 0x8000) modifiers |= MOD_CONTROL;
+    if (GetKeyState(VK_MENU) & 0x8000) modifiers |= MOD_ALT;
+    if (GetKeyState(VK_SHIFT) & 0x8000) modifiers |= MOD_SHIFT;
+    if ((GetKeyState(VK_LWIN) & 0x8000) || (GetKeyState(VK_RWIN) & 0x8000)) {
+        modifiers |= MOD_WIN;
+    }
+
+    const std::wstring rejection = HotkeyRejection(modifiers, key);
+    if (!rejection.empty()) {
+        MessageBoxW(g_settingsWindow, rejection.c_str(), L"Mote", MB_OK | MB_ICONWARNING);
+        return 0;
+    }
+
+    const std::wstring text = FormatHotkey(modifiers, key);
+    for (int i = 0; i < 5; ++i) {
+        if (kHotkeyIds[i] != hotkeyId && g_draftHotkeys[i] == text) {
+            MessageBoxW(
+                g_settingsWindow,
+                L"这个组合已经分配给另一个动作了。",
+                L"Mote",
+                MB_OK | MB_ICONWARNING
+            );
+            return 0;
+        }
+    }
+
+    for (int i = 0; i < 5; ++i) {
+        if (kHotkeyIds[i] == hotkeyId) {
+            g_draftHotkeys[i] = text;
+        }
+    }
+    FinishHotkeyRecording();
+    return 0;
+}
+
+const wchar_t* kPresetNames[] = {
+    L"自定义",
+    L"OpenAI",
+    L"DeepSeek",
+    L"Ollama",
+    L"LM Studio",
+};
+
+const wchar_t* kPresetEndpoints[] = {
+    L"",
+    L"https://api.openai.com/v1",
+    L"https://api.deepseek.com/v1",
+    L"http://localhost:11434/v1",
+    L"http://localhost:1234/v1",
+};
+
+const wchar_t* kPresetModels[] = {
+    L"",
+    L"gpt-4o-mini",
+    L"deepseek-chat",
+    L"qwen2.5:7b",
+    L"local-model",
+};
+
+void ApplyPreset(HWND combo) {
+    const int index = static_cast<int>(SendMessageW(combo, CB_GETCURSEL, 0, 0));
+    if (index <= 0 || index >= static_cast<int>(std::size(kPresetEndpoints))) {
+        return;
+    }
+    SetWindowTextW(g_setEndpoint, kPresetEndpoints[index]);
+    if (g_setModelCombo) {
+        SetWindowTextW(g_setModelCombo, kPresetModels[index]);
+    }
+}
+
+void FetchModels() {
+    AppConfig config = Config();
+    ReadSettings(config);
+    if (config.endpoint.empty()) {
+        MessageBoxW(g_settingsWindow, L"请先填写接口地址。", L"Mote", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    if (g_setFetchModels) {
+        EnableWindow(g_setFetchModels, FALSE);
+        SetWindowTextW(g_setFetchModels, L"获取中…");
+    }
+    std::thread([config]() {
+        try {
+            winrt::init_apartment(winrt::apartment_type::multi_threaded);
+        } catch (...) {
+        }
+        std::vector<std::wstring> models;
+        std::wstring error;
+        const bool ok = ListModels(config, models, error);
+        std::wstring message;
+        if (ok) {
+            message = L"共 " + std::to_wstring(models.size()) + L" 个模型，已填入下拉列表。";
+            const size_t limit = std::min<size_t>(models.size(), 50);
+            for (size_t i = 0; i < limit; ++i) {
+                message += L"\r\n" + models[i];
+            }
+        } else {
+            message = L"获取失败：" + error;
+        }
+        // 先交回 UI 线程填下拉框（避免跨线程动控件），再弹结果说明
+        if (IsWindow(g_settingsWindow)) {
+            auto* payload = ok ? new std::vector<std::wstring>(std::move(models)) : nullptr;
+            PostMessageW(
+                g_settingsWindow,
+                WM_APP_MODEL_LIST,
+                ok ? 1 : 0,
+                reinterpret_cast<LPARAM>(payload)
+            );
+        }
+        MessageBoxW(nullptr, message.c_str(), L"Mote 获取模型", MB_OK | MB_ICONINFORMATION);
+        try {
+            winrt::uninit_apartment();
+        } catch (...) {
+        }
+    }).detach();
 }
 
 void ShowSettingsWindow() {
     if (!g_settingsWindow) {
-        return;
+        g_settingsWindow = CreateSettings(g_instance);
+        if (!g_settingsWindow) {
+            return;
+        }
     }
 
-    SetWindowTextW(g_setEndpoint, Config().endpoint.c_str());
-    SetWindowTextW(g_setModel, Config().model.c_str());
-    SetWindowTextW(g_setKey, Config().aiKey.c_str());
-    SetWindowTextW(g_setBaiduID, Config().baiduAppID.c_str());
-    SetWindowTextW(g_setBaiduKey, Config().baiduKey.c_str());
+    const AppConfig config = Config();
+    SetWindowTextW(g_setEndpoint, config.endpoint.c_str());
+    SetWindowTextW(g_setModel, config.model.c_str());
+    SetWindowTextW(g_setKey, config.aiKey.c_str());
+    SetWindowTextW(g_setBaiduID, config.baiduAppID.c_str());
+    SetWindowTextW(g_setBaiduKey, config.baiduKey.c_str());
+    SetWindowTextW(
+        g_setPrompt,
+        (config.systemPrompt.empty() ? DefaultSystemPrompt() : config.systemPrompt).c_str()
+    );
     SendMessageW(
         g_setLLMCheck,
         BM_SETCHECK,
-        Config().llmEnabled ? BST_CHECKED : BST_UNCHECKED,
+        config.llmEnabled ? BST_CHECKED : BST_UNCHECKED,
         0
     );
     SendMessageW(
         g_setBaiduCheck,
         BM_SETCHECK,
-        Config().baiduEnabled ? BST_CHECKED : BST_UNCHECKED,
+        config.baiduEnabled ? BST_CHECKED : BST_UNCHECKED,
         0
     );
     SendMessageW(
@@ -501,20 +971,36 @@ void ShowSettingsWindow() {
         0
     );
 
+    g_draftAutoCopy = config.autoCopy;
+    SendMessageW(
+        g_setAutoCopyCheck,
+        BM_SETCHECK,
+        config.autoCopy ? BST_CHECKED : BST_UNCHECKED,
+        0
+    );
+    SetWindowTextW(g_setPopupWidth, std::to_wstring(config.popupWidth).c_str());
+    SetWindowTextW(g_setPopupHeight, std::to_wstring(config.popupHeight).c_str());
+
+    for (int i = 0; i < 5; ++i) {
+        g_draftHotkeys[i] = HotkeyText(Config(), kHotkeyIds[i]);
+    }
+    g_recordingHotkey = 0;
+    RefreshHotkeyButtons();
+
     SendMessageW(g_setLanguage, CB_RESETCONTENT, 0, 0);
     for (const auto* language : kLanguages) {
         SendMessageW(g_setLanguage, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(language));
     }
     int index = 0;
     for (int i = 0; i < static_cast<int>(std::size(kLanguages)); ++i) {
-        if (Config().targetLanguage == kLanguages[i]) {
+        if (config.targetLanguage == kLanguages[i]) {
             index = i;
             break;
         }
     }
     SendMessageW(g_setLanguage, CB_SETCURSEL, index, 0);
 
-    CenterWindow(g_settingsWindow, 640, 520);
+    CenterWindow(g_settingsWindow, 680, 620);
     SetForegroundWindow(g_settingsWindow);
 }
 
@@ -527,6 +1013,16 @@ void ReadSettings(AppConfig& config) {
     config.llmEnabled = SendMessageW(g_setLLMCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
     config.baiduEnabled = SendMessageW(g_setBaiduCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
     config.targetLanguage = SelectedLanguage(g_setLanguage);
+    config.autoCopy = SendMessageW(g_setAutoCopyCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
+
+    // 提示词与内置一致时不落盘，方便以后升级内置版本
+    const std::wstring prompt = Trim(GetText(g_setPrompt));
+    config.systemPrompt = (prompt == Trim(DefaultSystemPrompt())) ? L"" : prompt;
+
+    const int width = _wtoi(Trim(GetText(g_setPopupWidth)).c_str());
+    const int height = _wtoi(Trim(GetText(g_setPopupHeight)).c_str());
+    config.popupWidth = std::clamp(width, 480, 1200);
+    config.popupHeight = std::clamp(height, 380, 900);
 }
 
 void TestService(bool baidu) {
@@ -588,6 +1084,40 @@ LRESULT CALLBACK SourceEditProc(
     return DefSubclassProc(edit, message, wParam, lParam);
 }
 
+
+// 弹窗按当前客户区重排，窗口可拖动右下角改变尺寸
+void LayoutPopup(int width, int height) {
+    const int margin = 16;
+    const int contentWidth = std::max(200, width - margin * 2);
+
+    const int closeX = width - margin - 24;
+    const int settingsX = closeX - 8 - 50;
+    const int historyX = settingsX - 6 - 50;
+    const int languageX = std::max(margin + 120, historyX - 8 - 110);
+
+    if (g_popupTitle) MoveWindow(g_popupTitle, margin, 12, 120, 24, TRUE);
+    if (g_languageCombo) MoveWindow(g_languageCombo, languageX, 10, 110, 200, TRUE);
+    if (g_popupHistory) MoveWindow(g_popupHistory, historyX, 10, 50, 26, TRUE);
+    if (g_popupSettings) MoveWindow(g_popupSettings, settingsX, 10, 50, 26, TRUE);
+    if (g_popupClose) MoveWindow(g_popupClose, closeX, 10, 24, 26, TRUE);
+
+    if (g_popupSourceLabel) MoveWindow(g_popupSourceLabel, margin, 48, 100, 20, TRUE);
+
+    const int sourceTop = 68;
+    const int body = std::max(160, height - sourceTop - margin);
+    const int sourceHeight = std::max(60, static_cast<int>(body * 0.34));
+    const int buttonTop = sourceTop + sourceHeight + 8;
+    const int targetLabelTop = buttonTop + 30 + 10;
+    const int targetTop = targetLabelTop + 20;
+    const int targetHeight = std::max(60, height - targetTop - margin);
+
+    if (g_sourceEdit) MoveWindow(g_sourceEdit, margin, sourceTop, contentWidth, sourceHeight, TRUE);
+    if (g_translateButton) MoveWindow(g_translateButton, margin, buttonTop, 90, 30, TRUE);
+    if (g_statusLabel) MoveWindow(g_statusLabel, margin + 100, buttonTop + 6, 300, 20, TRUE);
+    if (g_popupOutputLabel) MoveWindow(g_popupOutputLabel, margin, targetLabelTop, 100, 20, TRUE);
+    if (g_outputEdit) MoveWindow(g_outputEdit, margin, targetTop, contentWidth, targetHeight, TRUE);
+}
+
 HWND CreateControl(
     LPCWSTR className,
     LPCWSTR text,
@@ -619,34 +1149,33 @@ HWND CreateControl(
 LRESULT CALLBACK PopupWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_CREATE: {
-        const int titleX = 16;
-        CreateControl(
+        g_popupTitle = CreateControl(
             L"STATIC", L"Mote",
             WS_CHILD | WS_VISIBLE,
-            titleX, 12, 160, 24, window, -1
+            16, 12, 160, 24, window, -1
         );
         g_languageCombo = CreateControl(
             WC_COMBOBOXW, L"",
             WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-            300, 10, 110, 160, window, ID_LANGUAGE
+            300, 10, 110, 200, window, ID_LANGUAGE
         );
-        CreateControl(
+        g_popupHistory = CreateControl(
             L"BUTTON", L"历史",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
             418, 10, 50, 26, window, ID_HISTORY
         );
-        CreateControl(
+        g_popupSettings = CreateControl(
             L"BUTTON", L"设置",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
             472, 10, 50, 26, window, ID_SETTINGS
         );
-        CreateControl(
+        g_popupClose = CreateControl(
             L"BUTTON", L"×",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
             526, 10, 24, 26, window, ID_CLOSE
         );
 
-        CreateControl(
+        g_popupSourceLabel = CreateControl(
             L"STATIC", L"原文",
             WS_CHILD | WS_VISIBLE,
             16, 48, 80, 20, window, -1
@@ -668,7 +1197,7 @@ LRESULT CALLBACK PopupWindowProc(HWND window, UINT message, WPARAM wParam, LPARA
             116, 174, 300, 20, window, -1
         );
 
-        CreateControl(
+        g_popupOutputLabel = CreateControl(
             L"STATIC", L"译文",
             WS_CHILD | WS_VISIBLE,
             16, 206, 80, 20, window, -1
@@ -687,8 +1216,50 @@ LRESULT CALLBACK PopupWindowProc(HWND window, UINT message, WPARAM wParam, LPARA
         SetWindowSubclass(g_sourceEdit, SourceEditProc, 1, 0);
 
         PopulateLanguages(g_languageCombo);
+
+        RECT client{};
+        GetClientRect(window, &client);
+        LayoutPopup(client.right, client.bottom);
         return 0;
     }
+
+    case WM_SIZE:
+        if (wParam != SIZE_MINIMIZED) {
+            LayoutPopup(LOWORD(lParam), HIWORD(lParam));
+        }
+        return 0;
+
+    case WM_GETMINMAXINFO: {
+        auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
+        info->ptMinTrackSize.x = 480;
+        info->ptMinTrackSize.y = 380;
+        return 0;
+    }
+
+    case WM_EXITSIZEMOVE: {
+        RECT rect{};
+        GetWindowRect(window, &rect);
+        RECT client{};
+        GetClientRect(window, &client);
+        Config().popupPositioned = true;
+        Config().popupX = rect.left;
+        Config().popupY = rect.top;
+        Config().popupWidth = client.right;
+        Config().popupHeight = client.bottom;
+        SaveConfig();
+        return 0;
+    }
+
+    case WM_ACTIVATE:
+        if (LOWORD(wParam) == WA_INACTIVE) {
+            if (g_suppressAutoHide) {
+                // 点了弹窗里的「设置」「历史」，这次失焦不该收起
+                g_suppressAutoHide = false;
+            } else {
+                HidePopup();
+            }
+        }
+        return 0;
 
     case WM_COMMAND: {
         const int id = LOWORD(wParam);
@@ -712,10 +1283,12 @@ LRESULT CALLBACK PopupWindowProc(HWND window, UINT message, WPARAM wParam, LPARA
             return 0;
         }
         if (id == ID_SETTINGS) {
+            g_suppressAutoHide = true;
             ShowSettingsWindow();
             return 0;
         }
         if (id == ID_HISTORY) {
+            g_suppressAutoHide = true;
             ShowHistoryWindow();
             return 0;
         }
@@ -737,6 +1310,14 @@ LRESULT CALLBACK PopupWindowProc(HWND window, UINT message, WPARAM wParam, LPARA
             EnableWindow(g_translateButton, TRUE);
             UpdateStatus();
             AddHistory(payload->source, payload->target, payload->results);
+            if (Config().autoCopy) {
+                for (const auto& result : payload->results) {
+                    if (result.ok && !result.text.empty()) {
+                        SetClipboardText(result.text);
+                        break;
+                    }
+                }
+            }
         }
         delete payload;
         return 0;
@@ -774,7 +1355,7 @@ HWND CreatePopup(HINSTANCE instance) {
         WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
         L"MotePopup",
         L"Mote",
-        WS_POPUP,
+        WS_POPUP | WS_THICKFRAME,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         540,
@@ -786,132 +1367,271 @@ HWND CreatePopup(HINSTANCE instance) {
     );
 }
 
+
+const wchar_t* kSettingsPageTitles[] = {L"通用", L"服务", L"翻译", L"历史"};
+
+HWND PageControl(
+    int page,
+    LPCWSTR className,
+    LPCWSTR text,
+    DWORD style,
+    int x,
+    int y,
+    int width,
+    int height,
+    HWND parent,
+    int id,
+    DWORD exStyle = 0
+) {
+    HWND control = CreateControl(
+        className, text, WS_CHILD | style, x, y, width, height, parent, id, exStyle
+    );
+    AddPageControl(page, control);
+    return control;
+}
+
+void CreateGeneralPage(HWND parent) {
+    int y = 52;
+    g_setLaunchCheck = PageControl(
+        0, L"BUTTON", L"开机自动启动", WS_VISIBLE | BS_AUTOCHECKBOX,
+        28, y, 240, 24, parent, ID_SET_LAUNCH
+    );
+    y += 32;
+    g_setAutoCopyCheck = PageControl(
+        0, L"BUTTON", L"翻译完成后自动复制译文", WS_VISIBLE | BS_AUTOCHECKBOX,
+        28, y, 280, 24, parent, ID_SET_AUTOCOPY
+    );
+
+    y += 40;
+    PageControl(
+        0, L"STATIC", L"全局快捷键：点按钮后按下新的组合键，Esc 放弃",
+        WS_VISIBLE, 28, y, 520, 20, parent, -1
+    );
+    y += 26;
+    for (int i = 0; i < 5; ++i) {
+        PageControl(
+            0, L"STATIC", HotkeyLabel(kHotkeyIds[i]),
+            WS_VISIBLE, 28, y + 6, 110, 20, parent, -1
+        );
+        g_hotkeyButtons[i] = PageControl(
+            0, L"BUTTON", L"", WS_VISIBLE | BS_PUSHBUTTON,
+            150, y, 220, 30, parent, ID_SET_HOTKEY_BASE + i
+        );
+        SetWindowSubclass(
+            g_hotkeyButtons[i],
+            HotkeyRecorderProc,
+            static_cast<UINT_PTR>(kHotkeyIds[i]),
+            static_cast<DWORD_PTR>(kHotkeyIds[i])
+        );
+        y += 36;
+    }
+
+    y += 10;
+    PageControl(0, L"STATIC", L"弹窗尺寸", WS_VISIBLE, 28, y, 200, 20, parent, -1);
+    y += 26;
+    PageControl(0, L"STATIC", L"宽度", WS_VISIBLE, 28, y + 4, 40, 20, parent, -1);
+    g_setPopupWidth = PageControl(
+        0, L"EDIT", L"", WS_VISIBLE | WS_BORDER | ES_NUMBER,
+        72, y, 70, 26, parent, ID_SET_POPUP_WIDTH, WS_EX_CLIENTEDGE
+    );
+    PageControl(0, L"STATIC", L"高度", WS_VISIBLE, 160, y + 4, 40, 20, parent, -1);
+    g_setPopupHeight = PageControl(
+        0, L"EDIT", L"", WS_VISIBLE | WS_BORDER | ES_NUMBER,
+        204, y, 70, 26, parent, ID_SET_POPUP_HEIGHT, WS_EX_CLIENTEDGE
+    );
+    PageControl(
+        0, L"STATIC", L"像素；也可以在弹窗右下角拖动调整，位置会自动记住。",
+        WS_VISIBLE, 286, y + 4, 340, 20, parent, -1
+    );
+}
+
+void CreateServicePage(HWND parent) {
+    int y = 52;
+    g_setLLMCheck = PageControl(
+        1, L"BUTTON", L"启用 AI 翻译", WS_VISIBLE | BS_AUTOCHECKBOX,
+        28, y, 200, 24, parent, ID_SET_LLM
+    );
+
+    y += 34;
+    PageControl(1, L"STATIC", L"服务预设", WS_VISIBLE, 28, y + 4, 70, 20, parent, -1);
+    g_setPreset = PageControl(
+        1, WC_COMBOBOXW, L"", WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+        110, y, 200, 200, parent, ID_SET_PRESET
+    );
+    for (const auto* name : kPresetNames) {
+        SendMessageW(g_setPreset, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name));
+    }
+    SendMessageW(g_setPreset, CB_SETCURSEL, 0, 0);
+
+    y += 36;
+    PageControl(1, L"STATIC", L"接口地址", WS_VISIBLE, 28, y + 4, 70, 20, parent, -1);
+    g_setEndpoint = PageControl(
+        1, L"EDIT", L"", WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+        110, y, 500, 26, parent, ID_SET_ENDPOINT, WS_EX_CLIENTEDGE
+    );
+
+    y += 36;
+    PageControl(1, L"STATIC", L"模型", WS_VISIBLE, 28, y + 4, 70, 20, parent, -1);
+    g_setModel = g_setModelCombo = PageControl(
+        1, WC_COMBOBOXW, L"", WS_VISIBLE | CBS_DROPDOWN | WS_VSCROLL,
+        110, y, 360, 240, parent, ID_SET_MODEL
+    );
+    g_setFetchModels = PageControl(
+        1, L"BUTTON", L"获取模型", WS_VISIBLE | BS_PUSHBUTTON,
+        480, y - 2, 130, 28, parent, ID_SET_FETCH_MODELS
+    );
+
+    y += 36;
+    PageControl(1, L"STATIC", L"API Key", WS_VISIBLE, 28, y + 4, 70, 20, parent, -1);
+    g_setKey = PageControl(
+        1, L"EDIT", L"", WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_PASSWORD,
+        110, y, 500, 26, parent, ID_SET_KEY, WS_EX_CLIENTEDGE
+    );
+
+    y += 44;
+    g_setBaiduCheck = PageControl(
+        1, L"BUTTON", L"启用百度翻译", WS_VISIBLE | BS_AUTOCHECKBOX,
+        28, y, 200, 24, parent, ID_SET_BAIDU
+    );
+
+    y += 34;
+    PageControl(1, L"STATIC", L"AppID", WS_VISIBLE, 28, y + 4, 70, 20, parent, -1);
+    g_setBaiduID = PageControl(
+        1, L"EDIT", L"", WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+        110, y, 500, 26, parent, ID_SET_BAIDU_ID, WS_EX_CLIENTEDGE
+    );
+
+    y += 36;
+    PageControl(1, L"STATIC", L"密钥", WS_VISIBLE, 28, y + 4, 70, 20, parent, -1);
+    g_setBaiduKey = PageControl(
+        1, L"EDIT", L"", WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_PASSWORD,
+        110, y, 500, 26, parent, ID_SET_BAIDU_KEY, WS_EX_CLIENTEDGE
+    );
+
+    y += 44;
+    PageControl(
+        1, L"BUTTON", L"测试 AI", WS_VISIBLE | BS_PUSHBUTTON,
+        28, y, 110, 30, parent, ID_SET_TEST_AI
+    );
+    PageControl(
+        1, L"BUTTON", L"测试百度", WS_VISIBLE | BS_PUSHBUTTON,
+        146, y, 110, 30, parent, ID_SET_TEST_BAIDU
+    );
+    PageControl(
+        1, L"STATIC", L"密钥保存在 Windows 凭据管理器",
+        WS_VISIBLE, 286, y + 6, 320, 20, parent, -1
+    );
+}
+
+void CreateTranslatePage(HWND parent) {
+    int y = 52;
+    PageControl(2, L"STATIC", L"目标语言", WS_VISIBLE, 28, y + 4, 70, 20, parent, -1);
+    g_setLanguage = PageControl(
+        2, WC_COMBOBOXW, L"", WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+        110, y, 220, 200, parent, ID_SET_LANGUAGE
+    );
+
+    y += 44;
+    PageControl(
+        2, L"STATIC", L"系统提示词（发给模型的开头说明，可用 {targetLang} 引用目标语言）",
+        WS_VISIBLE, 28, y, 560, 20, parent, -1
+    );
+    y += 26;
+    g_setPrompt = PageControl(
+        2, L"EDIT", L"",
+        WS_VISIBLE | WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL,
+        28, y, 580, 320, parent, ID_SET_PROMPT, WS_EX_CLIENTEDGE
+    );
+
+    y += 332;
+    PageControl(
+        2, L"BUTTON", L"恢复默认", WS_VISIBLE | BS_PUSHBUTTON,
+        28, y, 110, 30, parent, ID_SET_PROMPT_RESET
+    );
+    PageControl(
+        2, L"STATIC", L"留空则使用内置提示词。",
+        WS_VISIBLE, 150, y + 6, 300, 20, parent, -1
+    );
+}
+
+void CreateHistoryPage(HWND parent) {
+    PageControl(
+        3, L"STATIC",
+        L"翻译历史保存在 %APPDATA%\\Mote\\history.json，最多保留 100 条。",
+        WS_VISIBLE, 28, 52, 560, 20, parent, -1
+    );
+    PageControl(
+        3, L"BUTTON", L"打开历史窗口", WS_VISIBLE | BS_PUSHBUTTON,
+        28, 84, 140, 30, parent, ID_SET_OPEN_HISTORY
+    );
+    PageControl(
+        3, L"BUTTON", L"清空历史", WS_VISIBLE | BS_PUSHBUTTON,
+        180, 84, 110, 30, parent, ID_SET_CLEAR_HISTORY
+    );
+}
+
 LRESULT CALLBACK SettingsWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_CREATE: {
-        int y = 16;
-        CreateControl(
-            L"STATIC", L"AI 翻译（OpenAI 兼容）",
+        g_settingsTab = CreateControl(
+            WC_TABCONTROLW, L"",
             WS_CHILD | WS_VISIBLE,
-            20, y, 300, 22, window, -1
+            10, 10, 636, 566, window, ID_SET_TAB
         );
-        SendMessageW(GetWindow(window, GW_CHILD), WM_SETFONT, reinterpret_cast<WPARAM>(g_boldFont), TRUE);
+        for (int i = 0; i < 4; ++i) {
+            TCITEMW tab{};
+            tab.mask = TCIF_TEXT;
+            tab.pszText = const_cast<LPWSTR>(kSettingsPageTitles[i]);
+            TabCtrl_InsertItem(g_settingsTab, i, &tab);
+        }
 
-        y += 30;
-        g_setLLMCheck = CreateControl(
-            L"BUTTON", L"启用 AI 翻译",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            20, y, 180, 24, window, ID_SET_LLM
-        );
-
-        y += 32;
-        CreateControl(L"STATIC", L"接口地址", WS_CHILD | WS_VISIBLE, 20, y + 4, 80, 20, window, -1);
-        g_setEndpoint = CreateControl(
-            L"EDIT", L"",
-            WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
-            110, y, 500, 26, window, ID_SET_ENDPOINT,
-            WS_EX_CLIENTEDGE
-        );
-
-        y += 36;
-        CreateControl(L"STATIC", L"模型", WS_CHILD | WS_VISIBLE, 20, y + 4, 80, 20, window, -1);
-        g_setModel = CreateControl(
-            L"EDIT", L"",
-            WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
-            110, y, 500, 26, window, ID_SET_MODEL,
-            WS_EX_CLIENTEDGE
-        );
-
-        y += 36;
-        CreateControl(L"STATIC", L"API Key", WS_CHILD | WS_VISIBLE, 20, y + 4, 80, 20, window, -1);
-        g_setKey = CreateControl(
-            L"EDIT", L"",
-            WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_PASSWORD,
-            110, y, 500, 26, window, ID_SET_KEY,
-            WS_EX_CLIENTEDGE
-        );
-
-        y += 36;
-        CreateControl(L"STATIC", L"目标语言", WS_CHILD | WS_VISIBLE, 20, y + 4, 80, 20, window, -1);
-        g_setLanguage = CreateControl(
-            WC_COMBOBOXW, L"",
-            WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-            110, y, 220, 160, window, ID_SET_LANGUAGE
-        );
-
-        y += 44;
-        CreateControl(
-            L"STATIC", L"百度翻译",
-            WS_CHILD | WS_VISIBLE,
-            20, y, 300, 22, window, -1
-        );
-
-        y += 30;
-        g_setBaiduCheck = CreateControl(
-            L"BUTTON", L"启用百度翻译",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            20, y, 180, 24, window, ID_SET_BAIDU
-        );
-
-        y += 32;
-        CreateControl(L"STATIC", L"AppID", WS_CHILD | WS_VISIBLE, 20, y + 4, 80, 20, window, -1);
-        g_setBaiduID = CreateControl(
-            L"EDIT", L"",
-            WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
-            110, y, 500, 26, window, ID_SET_BAIDU_ID,
-            WS_EX_CLIENTEDGE
-        );
-
-        y += 36;
-        CreateControl(L"STATIC", L"密钥", WS_CHILD | WS_VISIBLE, 20, y + 4, 80, 20, window, -1);
-        g_setBaiduKey = CreateControl(
-            L"EDIT", L"",
-            WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_PASSWORD,
-            110, y, 500, 26, window, ID_SET_BAIDU_KEY,
-            WS_EX_CLIENTEDGE
-        );
-
-        g_setLaunchCheck = CreateControl(
-            L"BUTTON", L"开机自动启动",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            20, y + 42, 170, 24, window, ID_SET_LAUNCH
-        );
-        CreateControl(
-            L"STATIC", L"密钥保存在 Windows 凭据管理器",
-            WS_CHILD | WS_VISIBLE,
-            210, y + 46, 330, 20, window, -1
-        );
-
-        CreateControl(
-            L"BUTTON", L"测试 AI",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            20, y + 72, 100, 30, window, ID_SET_TEST_AI
-        );
-        CreateControl(
-            L"BUTTON", L"测试百度",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            128, y + 72, 100, 30, window, ID_SET_TEST_BAIDU
-        );
-        CreateControl(
-            L"BUTTON", L"保存",
-            WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-            420, y + 72, 90, 30, window, ID_SET_SAVE
-        );
-        CreateControl(
-            L"BUTTON", L"取消",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            520, y + 72, 90, 30, window, ID_SET_CANCEL
-        );
+        CreateGeneralPage(window);
+        CreateServicePage(window);
+        CreateTranslatePage(window);
+        CreateHistoryPage(window);
 
         ApplyFont(window, g_font);
+        ShowSettingsPage(0);
+        return 0;
+    }
+
+    case WM_NOTIFY: {
+        const auto* header = reinterpret_cast<NMHDR*>(lParam);
+        if (header && header->hwndFrom == g_settingsTab && header->code == TCN_SELCHANGE) {
+            ShowSettingsPage(TabCtrl_GetCurSel(g_settingsTab));
+            return 0;
+        }
+        break;
+    }
+
+    case WM_APP_MODEL_LIST: {
+        if (g_setFetchModels) {
+            EnableWindow(g_setFetchModels, TRUE);
+            SetWindowTextW(g_setFetchModels, L"获取模型");
+        }
+        auto* models = reinterpret_cast<std::vector<std::wstring>*>(lParam);
+        if (models && g_setModel) {
+            const std::wstring current = Trim(GetText(g_setModel));
+            SendMessageW(g_setModel, CB_RESETCONTENT, 0, 0);
+            for (const auto& model : *models) {
+                SendMessageW(g_setModel, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(model.c_str()));
+            }
+            SetWindowTextW(g_setModel, current.empty() ? L"" : current.c_str());
+        }
+        delete models;
         return 0;
     }
 
     case WM_COMMAND: {
         const int id = LOWORD(wParam);
+        const int notification = HIWORD(wParam);
+
         if (id == ID_SET_SAVE) {
             AppConfig config = Config();
             ReadSettings(config);
+            for (int i = 0; i < 5; ++i) {
+                HotkeyText(config, kHotkeyIds[i]) = g_draftHotkeys[i];
+            }
             Config() = config;
             SaveConfig();
             if (!SetLaunchAtLogin(
@@ -923,11 +1643,19 @@ LRESULT CALLBACK SettingsWindowProc(HWND window, UINT message, WPARAM wParam, LP
                     MB_OK | MB_ICONWARNING
                 );
             }
+            // 热键改了要重新注册，占用冲突在这里一次性告诉用户
+            const std::wstring failed = RegisterAllHotkeys();
+            if (!failed.empty()) {
+                const std::wstring message = failed + L" 注册失败，可能被其他程序占用。";
+                MessageBoxW(window, message.c_str(), L"Mote", MB_OK | MB_ICONWARNING);
+            }
+            UpdateTrayTip();
             PopulateLanguages(g_languageCombo);
             ShowWindow(window, SW_HIDE);
             return 0;
         }
         if (id == ID_SET_CANCEL) {
+            FinishHotkeyRecording();
             ShowWindow(window, SW_HIDE);
             return 0;
         }
@@ -939,10 +1667,53 @@ LRESULT CALLBACK SettingsWindowProc(HWND window, UINT message, WPARAM wParam, LP
             TestService(true);
             return 0;
         }
+        if (id == ID_SET_PRESET && notification == CBN_SELCHANGE) {
+            ApplyPreset(g_setPreset);
+            return 0;
+        }
+        if (id == ID_SET_FETCH_MODELS) {
+            FetchModels();
+            return 0;
+        }
+        if (id == ID_SET_PROMPT_RESET) {
+            SetWindowTextW(g_setPrompt, DefaultSystemPrompt().c_str());
+            return 0;
+        }
+        if (id == ID_SET_AUTOCOPY) {
+            g_draftAutoCopy = SendMessageW(g_setAutoCopyCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
+            return 0;
+        }
+        if (id >= ID_SET_HOTKEY_BASE && id < ID_SET_HOTKEY_BASE + 5) {
+            const int index = id - ID_SET_HOTKEY_BASE;
+            // 录制期间先放开自己的热键，否则按到已注册的组合会直接触发动作
+            UnregisterAllHotkeys();
+            g_recordingHotkey = kHotkeyIds[index];
+            RefreshHotkeyButtons();
+            SetFocus(g_hotkeyButtons[index]);
+            return 0;
+        }
+        if (id == ID_SET_OPEN_HISTORY) {
+            ShowHistoryWindow();
+            return 0;
+        }
+        if (id == ID_SET_CLEAR_HISTORY) {
+            if (MessageBoxW(
+                    window,
+                    L"确定清空全部翻译历史？此操作无法撤销。",
+                    L"Mote",
+                    MB_YESNO | MB_ICONWARNING
+                ) == IDYES) {
+                History().clear();
+                SaveHistory();
+                RefreshHistoryWindow();
+            }
+            return 0;
+        }
         break;
     }
 
     case WM_CLOSE:
+        FinishHotkeyRecording();
         ShowWindow(window, SW_HIDE);
         return 0;
 
@@ -970,8 +1741,8 @@ HWND CreateSettings(HINSTANCE instance) {
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        640,
-        470,
+        680,
+        620,
         nullptr,
         nullptr,
         instance,
@@ -982,39 +1753,62 @@ HWND CreateSettings(HINSTANCE instance) {
 LRESULT CALLBACK HistoryWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_CREATE:
+        g_historySearch = CreateControl(
+            L"EDIT", L"",
+            WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+            12, 14, 400, 26, window, ID_HISTORY_SEARCH, WS_EX_CLIENTEDGE
+        );
+        SendMessageW(
+            g_historySearch,
+            EM_SETCUEBANNER,
+            TRUE,
+            reinterpret_cast<LPARAM>(L"搜索原文或译文")
+        );
         g_historyList = CreateControl(
             L"LISTBOX", L"",
             WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOTIFY,
-            12, 12, 576, 360, window, ID_HISTORY_LIST
+            12, 52, 596, 392, window, ID_HISTORY_LIST
         );
         CreateControl(
             L"BUTTON", L"复制译文",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            12, 388, 100, 30, window, ID_HISTORY_COPY
+            12, 456, 100, 30, window, ID_HISTORY_COPY
+        );
+        CreateControl(
+            L"BUTTON", L"复制原文",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            120, 456, 100, 30, window, ID_HISTORY_COPY_SOURCE
         );
         CreateControl(
             L"BUTTON", L"清空",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            120, 388, 90, 30, window, ID_HISTORY_CLEAR
+            228, 456, 90, 30, window, ID_HISTORY_CLEAR
         );
         CreateControl(
             L"BUTTON", L"关闭",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            506, 388, 80, 30, window, ID_HISTORY_CLOSE
+            528, 456, 80, 30, window, ID_HISTORY_CLOSE
         );
         ApplyFont(window, g_font);
         return 0;
 
     case WM_COMMAND: {
         const int id = LOWORD(wParam);
+        if (id == ID_HISTORY_SEARCH && HIWORD(wParam) == EN_CHANGE) {
+            g_historyFilter = GetText(g_historySearch);
+            RefreshHistoryWindow();
+            return 0;
+        }
         if (id == ID_HISTORY_LIST && HIWORD(wParam) == LBN_DBLCLK) {
-            const int index = static_cast<int>(SendMessageW(g_historyList, LB_GETCURSEL, 0, 0));
-            CopyHistoryEntry(index);
+            CopyHistoryEntry(SelectedHistoryIndex(), false);
             return 0;
         }
         if (id == ID_HISTORY_COPY) {
-            const int index = static_cast<int>(SendMessageW(g_historyList, LB_GETCURSEL, 0, 0));
-            CopyHistoryEntry(index);
+            CopyHistoryEntry(SelectedHistoryIndex(), false);
+            return 0;
+        }
+        if (id == ID_HISTORY_COPY_SOURCE) {
+            CopyHistoryEntry(SelectedHistoryIndex(), true);
             return 0;
         }
         if (id == ID_HISTORY_CLEAR) {
@@ -1031,6 +1825,30 @@ LRESULT CALLBACK HistoryWindowProc(HWND window, UINT message, WPARAM wParam, LPA
         }
         if (id == ID_HISTORY_CLOSE) {
             ShowWindow(window, SW_HIDE);
+            return 0;
+        }
+        break;
+    }
+
+    case WM_CONTEXTMENU: {
+        POINT cursor{};
+        GetCursorPos(&cursor);
+        HMENU menu = CreatePopupMenu();
+        AppendMenuW(menu, MF_STRING, ID_HISTORY_COPY, L"复制译文");
+        AppendMenuW(menu, MF_STRING, ID_HISTORY_COPY_SOURCE, L"复制原文");
+        SetForegroundWindow(window);
+        const int command = TrackPopupMenu(
+            menu,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            cursor.x, cursor.y, 0, window, nullptr
+        );
+        DestroyMenu(menu);
+        if (command == ID_HISTORY_COPY) {
+            CopyHistoryEntry(SelectedHistoryIndex(), false);
+            return 0;
+        }
+        if (command == ID_HISTORY_COPY_SOURCE) {
+            CopyHistoryEntry(SelectedHistoryIndex(), true);
             return 0;
         }
         break;
@@ -1064,8 +1882,8 @@ HWND CreateHistory(HINSTANCE instance) {
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        620,
-        460,
+        660,
+        540,
         nullptr,
         nullptr,
         instance,
@@ -1076,8 +1894,8 @@ HWND CreateHistory(HINSTANCE instance) {
 void HandleSelection() {
     const std::wstring text = Trim(ReadSelectedText());
     if (text.empty()) {
+        // 与 mac 端一致：没读到内容就不弹空窗口
         ShowBalloon(L"没有获取到选中文本");
-        ShowPopup(L"", false);
         return;
     }
     ShowPopup(text, true);
@@ -1160,6 +1978,14 @@ LRESULT CALLBACK MessageWindowProc(HWND window, UINT message, WPARAM wParam, LPA
         case ID_TRAY_OCR:
             StartScreenshotSelection(window, false);
             break;
+        case ID_TRAY_ABOUT: {
+            const std::wstring message =
+                L"Mote\r\n\r\n轻量、原生的 AI 翻译工具。\r\n"
+                L"翻译在本地发起，不经过 Mote 服务器；不收集遥测。\r\n\r\n"
+                L"github.com/demoutgg/Mote";
+            MessageBoxW(g_messageWindow, message.c_str(), L"关于 Mote", MB_OK | MB_ICONINFORMATION);
+            break;
+        }
         case ID_TRAY_HISTORY:
             ShowHistoryWindow();
             break;
@@ -1225,6 +2051,10 @@ void RefreshHistoryList() {
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);
 
+    // 设置页用 Tab 控件分页，必须先初始化 comctl32
+    INITCOMMONCONTROLSEX comctl{sizeof(comctl), ICC_TAB_CLASSES | ICC_STANDARD_CLASSES};
+    InitCommonControlsEx(&comctl);
+
     try {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
     } catch (...) {
@@ -1253,40 +2083,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 
     g_messageWindow = CreateMessageWindow(instance);
     g_popupWindow = CreatePopup(instance);
-    g_settingsWindow = CreateSettings(instance);
-    g_historyWindow = CreateHistory(instance);
-    if (!g_messageWindow || !g_popupWindow || !g_settingsWindow || !g_historyWindow) {
+    if (!g_messageWindow || !g_popupWindow) {
         return 1;
     }
 
     AddTrayIcon();
 
-    struct Hotkey {
-        int id;
-        UINT modifiers;
-        UINT key;
-        const wchar_t* name;
-    };
-    const Hotkey hotkeys[] = {
-        {kHotkeyInput, MOD_ALT, 'A', L"Alt+A"},
-        {kHotkeySelection, MOD_ALT, 'D', L"Alt+D"},
-        {kHotkeyClipboard, MOD_ALT, 'V', L"Alt+V"},
-        {kHotkeyScreenshot, MOD_ALT, 'S', L"Alt+S"},
-        {kHotkeyOcr, MOD_ALT | MOD_SHIFT, 'S', L"Shift+Alt+S"},
-    };
-
-    std::wstring failed;
-    for (const auto& hotkey : hotkeys) {
-        if (!RegisterHotKey(g_messageWindow, hotkey.id, hotkey.modifiers, hotkey.key)) {
-            if (!failed.empty()) {
-                failed += L"、";
-            }
-            failed += hotkey.name;
-        }
-    }
+    const std::wstring failed = RegisterAllHotkeys();
     if (!failed.empty()) {
         const std::wstring message =
-            failed + L" 已被其他应用占用。可以退出冲突应用，或稍后在其他版本中自定义。";
+            failed + L" 注册失败（被其他程序占用或写法不支持）。可在 设置 → 通用 里换一个组合。";
         MessageBoxW(nullptr, message.c_str(), L"Mote", MB_OK | MB_ICONWARNING);
     }
 

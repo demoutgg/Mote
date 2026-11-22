@@ -528,3 +528,68 @@ bool TranslateBaidu(
         return false;
     }
 }
+
+bool ListModels(
+    const AppConfig& config,
+    std::vector<std::wstring>& models,
+    std::wstring& error
+) {
+    models.clear();
+    if (config.endpoint.empty()) {
+        error = L"请先填写接口地址。";
+        return false;
+    }
+
+    // 与 NormalizeEndpoint 对齐：去掉已有的 chat/completions 尾巴再挂 /models
+    std::wstring base = config.endpoint;
+    while (!base.empty() && base.back() == L'/') {
+        base.pop_back();
+    }
+    const std::wstring chatSuffix = L"/chat/completions";
+    if (base.size() >= chatSuffix.size()
+        && base.compare(base.size() - chatSuffix.size(), chatSuffix.size(), chatSuffix) == 0) {
+        base.erase(base.size() - chatSuffix.size());
+    }
+    if (!(base.size() >= 3 && base.compare(base.size() - 3, 3, L"/v1") == 0)) {
+        base += L"/v1";
+    }
+
+    const HttpResult response = HttpRequest(
+        base + L"/models",
+        L"GET",
+        L"",
+        "",
+        config.aiKey
+    );
+    if (response.status < 200 || response.status >= 300) {
+        error = L"HTTP " + std::to_wstring(response.status) + L"：" + Truncate(response.body);
+        return false;
+    }
+
+    try {
+        using namespace winrt::Windows::Data::Json;
+        const std::wstring wide = Utf8ToWide(response.body);
+        const auto parsed = JsonObject::Parse(winrt::hstring(wide.c_str()));
+        if (!parsed.HasKey(L"data")) {
+            error = L"返回内容缺少 data 字段。";
+            return false;
+        }
+        const auto data = parsed.GetNamedArray(L"data");
+        for (uint32_t index = 0; index < data.Size(); ++index) {
+            const auto item = data.GetObjectAt(index);
+            if (!item.HasKey(L"id")) {
+                continue;
+            }
+            models.push_back(std::wstring(item.GetNamedString(L"id").c_str()));
+        }
+        if (models.empty()) {
+            error = L"服务没有返回任何模型。";
+            return false;
+        }
+        std::sort(models.begin(), models.end());
+        return true;
+    } catch (...) {
+        error = L"无法解析模型列表。";
+        return false;
+    }
+}
