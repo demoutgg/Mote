@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          chmod +x macos/scripts/*.sh
+          VERSION="$version" ./macos/scripts/package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          path: macos/dist/release/*
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          pwsh -NoProfile -ExecutionPolicy Bypass -File windows/scripts/package.ps1 -Version $version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: dist/*.zip
+
+  release:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**
+          draft: true
+          prerelease: true
+          generate_release_notes: true
+          body: |
+            当前构建未使用 Developer ID / 代码签名证书，属于未签名预览版。
+            macOS 首次打开如被拦截，请右键 → 打开；Windows SmartScreen 可能提示。
+            正式分发前请参考 docs/RELEASE.md 完成签名与公证。
