@@ -1,16 +1,37 @@
-# 签名与发布
+# 发布
 
 ## 版本号
 
-发布前同步更新：
+发布前同步：
 
 - `macos/Resources/Info.plist` 的 `CFBundleShortVersionString` / `CFBundleVersion`
-- `windows/resources` 里如有版本资源，同步修改
+- `windows/CMakeLists.txt` 里的版本资源
+- `docs/CHANGELOG.md` 增加对应条目
 - Git tag 使用 `vX.Y.Z`
 
-## macOS 签名与公证
+## 发布前检查
 
-正式分发需要 Apple Developer Program（约 $99/年）。
+- [ ] `cd macos && swift build -c release` 通过
+- [ ] `./macos/scripts/install.sh` 安装后逐项点验：输入、选中、剪贴板、截图翻译、截图 OCR
+- [ ] 权限引导能弹出，授权后自动关闭
+- [ ] 设置四个分页都能滚动到最底部，保存后不关闭窗口
+- [ ] 历史记录可搜索、复制、清空
+- [ ] `docs/CHANGELOG.md` 与 `README.md` 内容与实际一致
+- [ ] Windows 改动若未经实机验证，Release 说明里要写明
+
+## 本机打包
+
+```bash
+VERSION=0.9.0 ./macos/scripts/package.sh
+```
+
+产物在 `macos/dist/release/`：`Mote-0.9.0-macos.zip`、`Mote-0.9.0-macos.dmg`、`SHA256SUMS.txt`。
+
+没有证书时脚本自动使用 ad-hoc 签名，产物能跑但未经公证，用户首次打开需要右键 → 打开。
+
+## 签名与公证（macOS）
+
+正式分发需要 Apple Developer Program。
 
 1. 在 Apple Developer 后台创建 **Developer ID Application** 证书，导出 `.p12`。
 2. 导入钥匙串：
@@ -35,17 +56,13 @@ xcrun notarytool store-credentials "mote-notary" \
 ```bash
 CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
 NOTARY_PROFILE="mote-notary" \
-VERSION=0.8.0 \
+VERSION=0.9.0 \
 ./macos/scripts/package.sh
 ```
 
-产物在 `macos/dist/release/`：ZIP、DMG、SHA256SUMS。
+## 签名（Windows）
 
-没有证书时脚本会使用 ad-hoc 签名；别人下载后需要右键 → 打开，且无法通过公证。
-
-## Windows 签名
-
-正式分发建议购买 OV/EV 代码签名证书。签名命令：
+正式分发建议购买 OV/EV 代码签名证书：
 
 ```powershell
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
@@ -53,40 +70,52 @@ signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
   build\Release\Mote.exe
 ```
 
-没有证书时 exe 未签名，SmartScreen 会提示；可先点“更多信息 → 仍要运行”。
+没有证书时 exe 未签名，SmartScreen 会提示，用户需点「更多信息 → 仍要运行」。
 
-## GitHub Release
-
-两种方式：
+## 发布到 GitHub
 
 ### 自动（推荐）
 
 ```bash
-git tag v0.8.0
-git push origin v0.8.0
+git tag v0.9.0
+git push origin v0.9.0
 ```
 
-`.github/workflows/release.yml` 会：
-
-- macOS 打包 ZIP + DMG
-- Windows 打包 ZIP
-- 创建 **draft** Release，附件齐全
-
-到 GitHub → Releases 检查草稿并点击 Publish。
+`.github/workflows/release.yml` 会打包 macOS 的 ZIP/DMG 与 Windows 的 ZIP，创建 **draft** Release。到仓库 Releases 页面检查并点击 Publish。
 
 ### 手动
 
 ```bash
-gh release create v0.8.0 \
-  macos/dist/release/Mote-0.8.0-macos.dmg \
-  macos/dist/release/Mote-0.8.0-macos.zip \
-  dist/Mote-0.8.0-windows-x64.zip \
-  --draft --title "Mote 0.8.0" --notes-file RELEASE_NOTES.md
+gh release create v0.9.0 \
+  macos/dist/release/Mote-0.9.0-macos.dmg \
+  macos/dist/release/Mote-0.9.0-macos.zip \
+  macos/dist/release/SHA256SUMS.txt \
+  --title "Mote 0.9.0" --notes-file RELEASE_NOTES.md --latest
 ```
 
-## 自动化签名（可选）
+Windows 没有自测过的版本，不要附预编译 exe，说明里让用户自行构建。
 
-如果希望 CI 自动签名，在仓库 Secrets 中配置：
+### Release 说明模板
+
+```markdown
+## 安装
+
+下载 `Mote-<版本>-macos.dmg`，拖进「应用程序」。当前为 ad-hoc 签名、未经公证，
+首次打开请右键 → 打开。
+
+## 本次更新
+
+- …
+
+## 已知问题
+
+- Windows 版未经实机自测，仓库不提供预编译 exe，请参考 docs/BUILD.md 自行编译。
+- 重新编译后 ad-hoc 签名变化，需要重新授权辅助功能与屏幕录制。
+```
+
+## CI 自动签名（可选）
+
+在仓库 Secrets 中配置：
 
 - `MACOS_CERTIFICATE`：base64 编码的 `.p12`
 - `MACOS_CERTIFICATE_PASSWORD`
@@ -95,4 +124,4 @@ gh release create v0.8.0 \
 - `WINDOWS_CERTIFICATE`：base64 编码的 `.pfx`
 - `WINDOWS_CERTIFICATE_PASSWORD`
 
-然后在 release workflow 的打包前导入证书，并把 `CODESIGN_IDENTITY` / `NOTARY_PROFILE` 传给 `package.sh`，Windows 用 `signtool` 签名后再压缩。
+然后在 release workflow 打包前导入证书，把 `CODESIGN_IDENTITY` / `NOTARY_PROFILE` 传给 `package.sh`，Windows 用 `signtool` 签名后再压缩。

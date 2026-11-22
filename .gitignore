@@ -10,3 +10,4 @@ windows/out/
 *.suo
 *.log
 
+.openidea/
