@@ -303,12 +303,12 @@ std::wstring RegisterAllHotkeys() {
         const std::wstring text = HotkeyText(Config(), id);
         if (!ParseHotkey(text, spec)) {
             if (!failed.empty()) failed += L"、";
-            failed += HotkeyLabel(id) + L"（" + text + L" 无法识别）";
+            failed += std::wstring(HotkeyLabel(id)) + L"（" + text + L" 无法识别）";
             continue;
         }
         if (!RegisterHotKey(g_messageWindow, id, spec.modifiers, spec.key)) {
             if (!failed.empty()) failed += L"、";
-            failed += HotkeyLabel(id) + L"（" + text + L"）";
+            failed += std::wstring(HotkeyLabel(id)) + L"（" + text + L"）";
         }
     }
     return failed;
@@ -886,6 +886,8 @@ void ApplyPreset(HWND combo) {
         SetWindowTextW(g_setModelCombo, kPresetModels[index]);
     }
 }
+
+void ReadSettings(AppConfig& config);
 
 void FetchModels() {
     AppConfig config = Config();
