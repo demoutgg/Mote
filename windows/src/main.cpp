@@ -414,7 +414,7 @@ void ShowContextMenu() {
     AppendMenuW(menu, MF_STRING, ID_TRAY_SELECTION, L"选中翻译\tAlt+D");
     AppendMenuW(menu, MF_STRING, ID_TRAY_CLIPBOARD, L"剪贴翻译\tAlt+V");
     AppendMenuW(menu, MF_STRING, ID_TRAY_SCREENSHOT, L"截图翻译\tAlt+S");
-    AppendMenuW(menu, MF_STRING, ID_TRAY_OCR, L"截图 OCR（复制）\tShift+Alt+S");
+    AppendMenuW(menu, MF_STRING, ID_TRAY_OCR, L"截图 OCR\tShift+Alt+S");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, ID_TRAY_HISTORY, L"历史记录");
     AppendMenuW(menu, MF_STRING, ID_TRAY_SETTINGS, L"设置");

@@ -98,18 +98,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         for action in ShortcutAction.allCases {
             let binding = settingsStore.config.binding(for: action)
-            let title = action == .screenshotOCR ? "截图 OCR（复制）" : action.title
             menu.addItem(
                 menuItem(
-                    title: title,
+                    title: action.title,
                     action: selector(for: action),
                     keyEquivalent: binding.keyEquivalent,
                     modifiers: binding.eventModifiers
                 )
             )
         }
-        menu.addItem(menuItem(title: "使用指南…", action: #selector(showOnboarding)))
         menu.addItem(menuItem(title: "历史记录…", action: #selector(openHistory), keyEquivalent: "y"))
+        menu.addItem(menuItem(title: "使用指南…", action: #selector(showOnboarding)))
         menu.addItem(.separator())
         menu.addItem(menuItem(title: "设置…", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(menuItem(title: "辅助功能权限…", action: #selector(openAccessibilitySettings)))
