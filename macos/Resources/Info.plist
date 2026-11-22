@@ -5,23 +5,23 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>Lingolite</string>
+    <string>Mote</string>
     <key>CFBundleExecutable</key>
-    <string>Lingolite</string>
+    <string>Mote</string>
     <key>CFBundleIdentifier</key>
-    <string>com.demoutgg.lingolite</string>
+    <string>com.demoutgg.mote</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>Lingolite</string>
+    <string>Mote</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.7.4</string>
+    <string>0.8.0</string>
     <key>CFBundleVersion</key>
-    <string>13</string>
+    <string>14</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>

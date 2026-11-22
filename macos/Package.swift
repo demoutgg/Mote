@@ -2,14 +2,14 @@
 import PackageDescription
 
 let package = Package(
-    name: "Lingolite",
+    name: "Mote",
     platforms: [
         .macOS(.v13),
     ],
     targets: [
         .executableTarget(
-            name: "Lingolite",
-            path: "Sources/Lingolite",
+            name: "Mote",
+            path: "Sources/Mote",
             swiftSettings: [
                 .swiftLanguageMode(.v5),
             ],
@@ -22,8 +22,8 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "LingoliteOCR",
-            path: "Sources/LingoliteOCR",
+            name: "MoteOCR",
+            path: "Sources/MoteOCR",
             linkerSettings: [
                 .linkedFramework("Vision"),
                 .linkedFramework("ImageIO"),

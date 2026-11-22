@@ -6,10 +6,10 @@ cd "$(dirname "$0")/.."
 
 ./scripts/build-app.sh
 
-target="/Applications/Lingolite.app"
-pkill -x Lingolite >/dev/null 2>&1 || true
+target="/Applications/Mote.app"
+pkill -x Mote >/dev/null 2>&1 || true
 rm -rf "$target"
-cp -R dist/Lingolite.app "$target"
+cp -R dist/Mote.app "$target"
 
 echo "Installed $target"
 open "$target"

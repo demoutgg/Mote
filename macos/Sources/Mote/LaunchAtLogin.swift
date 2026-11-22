@@ -2,11 +2,17 @@
 import Foundation
 
 enum LaunchAtLogin {
-    private static let label = "com.demoutgg.lingolite"
+    private static let label = "com.demoutgg.mote"
+    private static let legacyLabel = "com.demoutgg.lingolite"
 
     private static var plistURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents/\(label).plist")
+    }
+
+    private static var legacyPlistURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/\(legacyLabel).plist")
     }
 
     static var isEnabled: Bool {
@@ -17,7 +23,7 @@ enum LaunchAtLogin {
         let manager = FileManager.default
         if enabled {
             let executable = Bundle.main.bundleURL
-                .appendingPathComponent("Contents/MacOS/Lingolite")
+                .appendingPathComponent("Contents/MacOS/Mote")
                 .path
             let directory = plistURL.deletingLastPathComponent()
             try manager.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -36,5 +42,14 @@ enum LaunchAtLogin {
         } else if manager.fileExists(atPath: plistURL.path) {
             try manager.removeItem(at: plistURL)
         }
+    }
+
+    static func migrateLegacyIfNeeded() {
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: legacyPlistURL.path) else { return }
+        if !manager.fileExists(atPath: plistURL.path) {
+            try? set(true)
+        }
+        try? manager.removeItem(at: legacyPlistURL)
     }
 }

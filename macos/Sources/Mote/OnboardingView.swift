@@ -19,7 +19,7 @@ struct OnboardingView: View {
                     .frame(width: 84, height: 84)
 
                 VStack(spacing: 6) {
-                    Text("欢迎使用 Lingolite")
+                    Text("欢迎使用 Mote")
                         .font(.system(size: 22, weight: .semibold))
                     Text("选中文本或框选屏幕区域，按快捷键得到 AI 翻译。")
                         .font(.system(size: 12))
@@ -33,7 +33,7 @@ struct OnboardingView: View {
                 step(
                     number: 1,
                     title: "授予必要权限",
-                    detail: "选中翻译需要辅助功能；截图翻译需要屏幕录制，授权后可能需要重启 Lingolite。",
+                    detail: "选中翻译需要辅助功能；截图翻译需要屏幕录制，授权后可能需要重启 Mote。",
                     status: axGranted && screenGranted ? "已完成" : "待授权",
                     statusColor: axGranted && screenGranted ? .green : .orange
                 ) {

@@ -1,7 +1,7 @@
 // 鼠标附近的悬浮翻译窗：负责显示、定位和焦点归还；不处理选区读取。
 import AppKit
 
-final class LingolitePanel: NSPanel {
+final class MotePanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 }
@@ -9,7 +9,7 @@ final class LingolitePanel: NSPanel {
 final class PopupController {
     static let size = NSSize(width: 520, height: 420)
 
-    private let panel: LingolitePanel
+    private let panel: MotePanel
     private let model: PopupViewModel
     private let store: SettingsStore
     private var escapeMonitor: Any?
@@ -23,13 +23,13 @@ final class PopupController {
     var onOpenSettings: (() -> Void)?
     var onOpenHistory: (() -> Void)?
 
-    private static let originXKey = "LingolitePopupOriginX"
-    private static let originYKey = "LingolitePopupOriginY"
+    private static let originXKey = "MotePopupOriginX"
+    private static let originYKey = "MotePopupOriginY"
 
     init(store: SettingsStore, service: TranslationService, history: HistoryStore) {
         self.store = store
         model = PopupViewModel(store: store, service: service, history: history)
-        panel = LingolitePanel(
+        panel = MotePanel(
             contentRect: NSRect(origin: .zero, size: Self.size),
             styleMask: [.borderless, .resizable],
             backing: .buffered,

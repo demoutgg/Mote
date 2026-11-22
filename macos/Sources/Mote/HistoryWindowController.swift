@@ -28,7 +28,7 @@ final class HistoryWindowController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Lingolite 历史记录"
+        window.title = "Mote 历史记录"
         window.contentView = NSHostingView(rootView: view)
         window.isReleasedWhenClosed = false
         window.delegate = self

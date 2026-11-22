@@ -1,4 +1,4 @@
-// Lingolite 的 OCR 子进程：读取截图、识别文字并输出到 stdout；不处理 UI 和翻译。
+// Mote 的 OCR 子进程：读取截图、识别文字并输出到 stdout；不处理 UI 和翻译。
 import Foundation
 import ImageIO
 import Vision

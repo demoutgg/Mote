@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let toastController = ToastController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        migrateLegacyDefaults()
+        LaunchAtLogin.migrateLegacyIfNeeded()
         setupMainMenu()
         setupStatusItem()
         settingsStore.$config
@@ -80,6 +82,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildStatusMenu()
     }
 
+    private func migrateLegacyDefaults() {
+        let key = OnboardingWindowController.completedKey
+        let current = UserDefaults.standard
+        guard !current.bool(forKey: key),
+              let legacy = UserDefaults(suiteName: "com.demoutgg.lingolite"),
+              legacy.bool(forKey: key) else {
+            return
+        }
+        current.set(true, forKey: key)
+    }
+
     private func rebuildStatusMenu() {
         guard let item = statusItem else { return }
         let menu = NSMenu()
@@ -102,8 +115,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(menuItem(title: "辅助功能权限…", action: #selector(openAccessibilitySettings)))
         menu.addItem(menuItem(title: "屏幕录制权限…", action: #selector(openScreenRecordingSettings)))
         menu.addItem(.separator())
-        menu.addItem(menuItem(title: "关于 Lingolite", action: #selector(showAbout)))
-        menu.addItem(menuItem(title: "退出 Lingolite", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(menuItem(title: "关于 Mote", action: #selector(showAbout)))
+        menu.addItem(menuItem(title: "退出 Mote", action: #selector(quit), keyEquivalent: "q"))
         item.menu = menu
     }
 
@@ -145,7 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let list = failures
             .map { "\($0.title)（\(settingsStore.config.binding(for: $0).display)）" }
             .joined(separator: "、")
-        NSLog("Lingolite: hotkey registration failed for \(list)")
+        NSLog("Mote: hotkey registration failed for \(list)")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             let alert = NSAlert()
@@ -179,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if name.isEmpty {
             button.image = nil
             button.title = "译"
-        } else if let image = NSImage(systemSymbolName: name, accessibilityDescription: "Lingolite") {
+        } else if let image = NSImage(systemSymbolName: name, accessibilityDescription: "Mote") {
             image.isTemplate = true
             button.image = image
             button.title = ""
@@ -187,7 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.image = nil
             button.title = "译"
         }
-        button.toolTip = "Lingolite · 选中文本按 ⌥D 翻译"
+        button.toolTip = "Mote · 选中文本按 ⌥D 翻译"
     }
 
     private func setupMainMenu() {
@@ -196,12 +209,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appMenuItem = NSMenuItem()
         mainMenu.addItem(appMenuItem)
         let appMenu = NSMenu()
-        appMenu.addItem(menuItem(title: "关于 Lingolite", action: #selector(showAbout)))
+        appMenu.addItem(menuItem(title: "关于 Mote", action: #selector(showAbout)))
         appMenu.addItem(.separator())
         appMenu.addItem(menuItem(title: "设置…", action: #selector(openSettings), keyEquivalent: ","))
         appMenu.addItem(menuItem(title: "历史记录…", action: #selector(openHistory), keyEquivalent: "y"))
         appMenu.addItem(.separator())
-        appMenu.addItem(menuItem(title: "退出 Lingolite", action: #selector(quit), keyEquivalent: "q"))
+        appMenu.addItem(menuItem(title: "退出 Mote", action: #selector(quit), keyEquivalent: "q"))
         appMenuItem.submenu = appMenu
 
         let historyMenuItem = NSMenuItem()
@@ -307,7 +320,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) {
         guard OCREngine.hasScreenPermission else {
             OCREngine.requestScreenPermission()
-            onError("截图功能需要“屏幕录制”权限。请在系统设置中授权；如果授权后仍提示，请重启 Lingolite 再试。")
+            onError("截图功能需要“屏幕录制”权限。请在系统设置中授权；如果授权后仍提示，请重启 Mote 再试。")
             return
         }
 
@@ -383,7 +396,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showAbout() {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
         NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationName: "Lingolite",
+            .applicationName: "Mote",
             .applicationVersion: version,
             .credits: NSAttributedString(
                 string: "轻量、原生的 AI 翻译工具\n⌥D 选中翻译 · ⌥S 截图翻译 · ⇧⌥S 截图 OCR",

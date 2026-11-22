@@ -157,7 +157,7 @@ bool IsLaunchAtLoginEnabled() {
     DWORD type = 0;
     DWORD size = 0;
     const bool exists =
-        RegQueryValueExW(key, L"Lingolite", nullptr, &type, nullptr, &size) == ERROR_SUCCESS;
+        RegQueryValueExW(key, L"Mote", nullptr, &type, nullptr, &size) == ERROR_SUCCESS;
     RegCloseKey(key);
     return exists;
 }
@@ -180,7 +180,7 @@ bool SetLaunchAtLogin(bool enabled) {
             const std::wstring command = L"\"" + std::wstring(path) + L"\"";
             ok = RegSetValueExW(
                 key,
-                L"Lingolite",
+                L"Mote",
                 0,
                 REG_SZ,
                 reinterpret_cast<const BYTE*>(command.c_str()),
@@ -188,12 +188,39 @@ bool SetLaunchAtLogin(bool enabled) {
             ) == ERROR_SUCCESS;
         }
     } else {
-        const LONG result = RegDeleteValueW(key, L"Lingolite");
+        const LONG result = RegDeleteValueW(key, L"Mote");
         ok = result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND;
     }
 
     RegCloseKey(key);
     return ok;
+}
+
+void MigrateLegacyLaunchAtLogin() {
+    const wchar_t* legacyName = L"Lingo" L"lite";
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            0,
+            KEY_QUERY_VALUE | KEY_SET_VALUE,
+            &key) != ERROR_SUCCESS) {
+        return;
+    }
+
+    auto exists = [&](const wchar_t* name) {
+        DWORD size = 0;
+        return RegQueryValueExW(key, name, nullptr, nullptr, nullptr, &size) == ERROR_SUCCESS;
+    };
+
+    const bool current = exists(L"Mote");
+    if (exists(legacyName)) {
+        if (!current) {
+            SetLaunchAtLogin(true);
+        }
+        RegDeleteValueW(key, legacyName);
+    }
+    RegCloseKey(key);
 }
 
 void PopulateLanguages(HWND combo) {
@@ -333,7 +360,7 @@ void AddTrayIcon() {
     if (!g_trayIcon.hIcon) {
         g_trayIcon.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     }
-    wcscpy_s(g_trayIcon.szTip, L"Lingolite · Alt+D 选中翻译");
+    wcscpy_s(g_trayIcon.szTip, L"Mote · Alt+D 选中翻译");
     Shell_NotifyIconW(NIM_ADD, &g_trayIcon);
 }
 
@@ -345,7 +372,7 @@ void ShowBalloon(const std::wstring& message) {
     NOTIFYICONDATAW data = g_trayIcon;
     data.uFlags = NIF_INFO;
     data.dwInfoFlags = NIIF_INFO;
-    wcscpy_s(data.szInfoTitle, L"Lingolite");
+    wcscpy_s(data.szInfoTitle, L"Mote");
     wcsncpy_s(data.szInfo, message.c_str(), _TRUNCATE);
     Shell_NotifyIconW(NIM_MODIFY, &data);
 }
@@ -392,7 +419,7 @@ void ShowContextMenu() {
     AppendMenuW(menu, MF_STRING, ID_TRAY_HISTORY, L"历史记录");
     AppendMenuW(menu, MF_STRING, ID_TRAY_SETTINGS, L"设置");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, ID_TRAY_EXIT, L"退出 Lingolite");
+    AppendMenuW(menu, MF_STRING, ID_TRAY_EXIT, L"退出 Mote");
 
     SetForegroundWindow(g_messageWindow);
     TrackPopupMenu(menu, TPM_RIGHTBUTTON, cursor.x, cursor.y, 0, g_messageWindow, nullptr);
@@ -519,7 +546,7 @@ void TestService(bool baidu) {
         const std::wstring message = ok
             ? L"连接成功：\r\n" + output
             : L"连接失败：\r\n" + error;
-        MessageBoxW(nullptr, message.c_str(), L"Lingolite 测试", MB_OK | MB_ICONINFORMATION);
+        MessageBoxW(nullptr, message.c_str(), L"Mote 测试", MB_OK | MB_ICONINFORMATION);
         try {
             winrt::uninit_apartment();
         } catch (...) {
@@ -594,7 +621,7 @@ LRESULT CALLBACK PopupWindowProc(HWND window, UINT message, WPARAM wParam, LPARA
     case WM_CREATE: {
         const int titleX = 16;
         CreateControl(
-            L"STATIC", L"Lingolite",
+            L"STATIC", L"Mote",
             WS_CHILD | WS_VISIBLE,
             titleX, 12, 160, 24, window, -1
         );
@@ -740,13 +767,13 @@ HWND CreatePopup(HINSTANCE instance) {
     windowClass.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_APP_ICON));
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     windowClass.hbrBackground = CreateSolidBrush(RGB(246, 246, 248));
-    windowClass.lpszClassName = L"LingolitePopup";
+    windowClass.lpszClassName = L"MotePopup";
     RegisterClassExW(&windowClass);
 
     return CreateWindowExW(
         WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
-        L"LingolitePopup",
-        L"Lingolite",
+        L"MotePopup",
+        L"Mote",
         WS_POPUP,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
@@ -892,7 +919,7 @@ LRESULT CALLBACK SettingsWindowProc(HWND window, UINT message, WPARAM wParam, LP
                 MessageBoxW(
                     window,
                     L"无法写入开机自启动项，请检查注册表权限。",
-                    L"Lingolite",
+                    L"Mote",
                     MB_OK | MB_ICONWARNING
                 );
             }
@@ -933,13 +960,13 @@ HWND CreateSettings(HINSTANCE instance) {
     windowClass.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_APP_ICON));
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     windowClass.hbrBackground = CreateSolidBrush(RGB(250, 250, 252));
-    windowClass.lpszClassName = L"LingoliteSettings";
+    windowClass.lpszClassName = L"MoteSettings";
     RegisterClassExW(&windowClass);
 
     return CreateWindowExW(
         WS_EX_DLGMODALFRAME | WS_EX_TOOLWINDOW,
-        L"LingoliteSettings",
-        L"Lingolite 设置",
+        L"MoteSettings",
+        L"Mote 设置",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
@@ -994,7 +1021,7 @@ LRESULT CALLBACK HistoryWindowProc(HWND window, UINT message, WPARAM wParam, LPA
             if (MessageBoxW(
                     window,
                     L"清空全部历史记录？此操作不可撤销。",
-                    L"Lingolite",
+                    L"Mote",
                     MB_YESNO | MB_ICONQUESTION) == IDYES) {
                 History().clear();
                 SaveHistory();
@@ -1027,13 +1054,13 @@ HWND CreateHistory(HINSTANCE instance) {
     windowClass.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_APP_ICON));
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     windowClass.hbrBackground = CreateSolidBrush(RGB(250, 250, 252));
-    windowClass.lpszClassName = L"LingoliteHistory";
+    windowClass.lpszClassName = L"MoteHistory";
     RegisterClassExW(&windowClass);
 
     return CreateWindowExW(
         WS_EX_DLGMODALFRAME | WS_EX_TOOLWINDOW,
-        L"LingoliteHistory",
-        L"Lingolite 历史记录",
+        L"MoteHistory",
+        L"Mote 历史记录",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
@@ -1170,12 +1197,12 @@ HWND CreateMessageWindow(HINSTANCE instance) {
     windowClass.cbSize = sizeof(windowClass);
     windowClass.lpfnWndProc = MessageWindowProc;
     windowClass.hInstance = instance;
-    windowClass.lpszClassName = L"LingoliteMessage";
+    windowClass.lpszClassName = L"MoteMessage";
     RegisterClassExW(&windowClass);
 
     return CreateWindowExW(
         0,
-        L"LingoliteMessage",
+        L"MoteMessage",
         L"",
         0,
         0,
@@ -1203,7 +1230,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     } catch (...) {
     }
 
-    HANDLE mutex = CreateMutexW(nullptr, TRUE, L"LingoliteSingleInstance");
+    HANDLE mutex = CreateMutexW(nullptr, TRUE, L"MoteSingleInstance");
     if (!mutex || GetLastError() == ERROR_ALREADY_EXISTS) {
         return 0;
     }
@@ -1222,6 +1249,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 
     LoadConfig();
     LoadHistory();
+    MigrateLegacyLaunchAtLogin();
 
     g_messageWindow = CreateMessageWindow(instance);
     g_popupWindow = CreatePopup(instance);
@@ -1259,7 +1287,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     if (!failed.empty()) {
         const std::wstring message =
             failed + L" 已被其他应用占用。可以退出冲突应用，或稍后在其他版本中自定义。";
-        MessageBoxW(nullptr, message.c_str(), L"Lingolite", MB_OK | MB_ICONWARNING);
+        MessageBoxW(nullptr, message.c_str(), L"Mote", MB_OK | MB_ICONWARNING);
     }
 
     if (Config().aiKey.empty() && Config().baiduKey.empty()) {

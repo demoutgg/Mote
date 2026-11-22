@@ -25,7 +25,7 @@ final class HistoryStore: ObservableObject {
     init() {
         let support = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Lingolite", isDirectory: true)
+            .appendingPathComponent("Mote", isDirectory: true)
         try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
         fileURL = support.appendingPathComponent("history.json")
         load()

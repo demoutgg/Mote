@@ -31,7 +31,7 @@ enum OCREngine {
     static func captureInteractive(completion: @escaping (Result<String, Error>) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("lingolite-ocr-\(UUID().uuidString).png")
+                .appendingPathComponent("mote-ocr-\(UUID().uuidString).png")
             defer { try? FileManager.default.removeItem(at: url) }
 
             let process = Process()
@@ -64,7 +64,7 @@ enum OCREngine {
 
     private static func recognizeWithHelper(url: URL) throws -> String {
         guard let helper = helperURL() else {
-            throw OCRError.failed("缺少 OCR 组件，请重新安装 Lingolite。")
+            throw OCRError.failed("缺少 OCR 组件，请重新安装 Mote。")
         }
 
         let process = Process()
@@ -100,11 +100,11 @@ enum OCREngine {
     }
 
     private static func helperURL() -> URL? {
-        if let url = Bundle.main.url(forAuxiliaryExecutable: "LingoliteOCR") {
+        if let url = Bundle.main.url(forAuxiliaryExecutable: "MoteOCR") {
             return url
         }
         let fallback = Bundle.main.bundleURL
-            .appendingPathComponent("Contents/MacOS/LingoliteOCR")
+            .appendingPathComponent("Contents/MacOS/MoteOCR")
         return FileManager.default.isExecutableFile(atPath: fallback.path) ? fallback : nil
     }
 }

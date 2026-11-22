@@ -279,7 +279,7 @@ struct SettingsView: View {
         Form {
             Section("启动") {
                 Toggle("开机自动启动", isOn: $launchAtLogin)
-                Text("登录时自动启动 Lingolite，下次登录生效；移动应用后需要重新勾选一次。")
+                Text("登录时自动启动 Mote，下次登录生效；移动应用后需要重新勾选一次。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -388,14 +388,14 @@ struct SettingsView: View {
 
             Section("关于") {
                 HStack {
-                    Text("Lingolite")
+                    Text("Mote")
                     Spacer()
                     Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0")
                         .foregroundStyle(.secondary)
                 }
                 Link("github.com/demoutgg/lingolite", destination: URL(string: "https://github.com/demoutgg/lingolite")!)
                     .font(.caption)
-                Text("翻译在本地发起，不经过 Lingolite 服务器；不收集遥测。")
+                Text("翻译在本地发起，不经过 Mote 服务器；不收集遥测。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

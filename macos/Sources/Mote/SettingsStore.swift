@@ -118,6 +118,8 @@ private extension String {
 }
 
 final class SettingsStore: ObservableObject {
+    private static let legacyAppName = "Lingo" + "lite"
+
     @Published var config: AppConfig
     @Published var apiKey: String
     @Published var baiduKey: String
@@ -125,10 +127,21 @@ final class SettingsStore: ObservableObject {
     private let configURL: URL
 
     init() {
-        let supportDirectory = FileManager.default
+        let fileManager = FileManager.default
+        let supportDirectory = fileManager
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Lingolite", isDirectory: true)
-        try? FileManager.default.createDirectory(
+            .appendingPathComponent("Mote", isDirectory: true)
+        let legacyDirectory = fileManager
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(Self.legacyAppName, isDirectory: true)
+
+        // 首次以 Mote 启动时迁移旧配置和历史。
+        if !fileManager.fileExists(atPath: supportDirectory.path),
+           fileManager.fileExists(atPath: legacyDirectory.path) {
+            try? fileManager.copyItem(at: legacyDirectory, to: supportDirectory)
+        }
+
+        try? fileManager.createDirectory(
             at: supportDirectory,
             withIntermediateDirectories: true
         )
@@ -146,6 +159,7 @@ final class SettingsStore: ObservableObject {
         } else {
             config = AppConfig()
         }
+        KeychainStore.migrateLegacyIfNeeded()
         apiKey = KeychainStore.read() ?? ""
         baiduKey = KeychainStore.read(account: "baidu-key") ?? ""
     }

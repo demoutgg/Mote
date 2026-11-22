@@ -1,4 +1,4 @@
-# Lingolite for Windows
+# Mote for Windows
 
 C++20 + Win32 的轻量客户端，产物是单一 exe 加 OCR 运行所需的系统组件。
 
@@ -27,7 +27,7 @@ cmake -S windows -B build -A x64
 cmake --build build --config Release
 ```
 
-产物在 `build/Release/Lingolite.exe`。
+产物在 `build/Release/Mote.exe`。
 
 ## 说明
 

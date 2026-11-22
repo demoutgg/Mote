@@ -18,7 +18,7 @@
 namespace {
 
 constexpr COLORREF kKeyColor = RGB(1, 2, 3);
-const wchar_t kOverlayClass[] = L"LingoliteOverlay";
+const wchar_t kOverlayClass[] = L"MoteOverlay";
 
 HWND g_overlay = nullptr;
 POINT g_start{};

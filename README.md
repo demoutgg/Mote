@@ -1,10 +1,10 @@
-# Lingolite
+# Mote
 
 轻量、原生的跨平台 AI 翻译工具。输入文本或框选屏幕区域，按快捷键得到流式翻译。
 
 ## 状态
 
-v0.7.4。macOS 已支持输入、选中、剪贴板、截图翻译、静默 OCR、历史记录与开机自启，可同时启用 AI 与百度翻译；Windows beta 已具备同样主流程。
+v0.8.0。应用已更名为 Mote。macOS 已支持输入、选中、剪贴板、截图翻译、静默 OCR、历史记录与开机自启，可同时启用 AI 与百度翻译；Windows beta 已具备同样主流程。
 
 ## 目标
 
@@ -18,7 +18,7 @@ v0.7.4。macOS 已支持输入、选中、剪贴板、截图翻译、静默 OCR�
 ## 技术栈
 
 - macOS：Swift 6 + AppKit/SwiftUI + Vision
-- OCR：独立的 `LingoliteOCR` 子进程，识别完立即退出，主应用不常驻 Vision
+- OCR：独立的 `MoteOCR` 子进程，识别完立即退出，主应用不常驻 Vision
 - Windows：C++20 + Win32 + WinRT OCR
 - 共享：JSON 配置格式、Prompt 规范、API 协议
 
@@ -31,7 +31,7 @@ cd macos
 ./scripts/install.sh   # 构建并安装到 /Applications
 
 # 只打包、不安装：
-./scripts/build-app.sh && open dist/Lingolite.app
+./scripts/build-app.sh && open dist/Mote.app
 ```
 
 选中翻译需要“辅助功能”权限；截图翻译与截图 OCR 需要“屏幕录制”权限。

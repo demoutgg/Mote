@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-constexpr wchar_t kAppName[] = L"Lingolite";
+constexpr wchar_t kAppName[] = L"Mote";
 constexpr UINT WM_APP_TRANSLATE_DONE = WM_APP + 10;
 constexpr UINT WM_APP_OCR_DONE = WM_APP + 11;
 

@@ -28,9 +28,25 @@ std::wstring AppDataDirectory() {
     PWSTR path = nullptr;
     std::wstring result;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &path))) {
-        result = path;
-        result += L"\\Lingolite";
+        const std::wstring base = path;
+        result = base + L"\\Mote";
         CreateDirectoryW(result.c_str(), nullptr);
+
+        // 从旧版目录迁移一次配置和历史。
+        const std::wstring legacy = base + L"\\Lingo" + L"lite";
+        const std::wstring newConfig = result + L"\\config.json";
+        if (GetFileAttributesW(newConfig.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            CopyFileW(
+                (legacy + L"\\config.json").c_str(),
+                newConfig.c_str(),
+                FALSE
+            );
+            CopyFileW(
+                (legacy + L"\\history.json").c_str(),
+                (result + L"\\history.json").c_str(),
+                FALSE
+            );
+        }
     }
     CoTaskMemFree(path);
     return result;
@@ -118,7 +134,7 @@ void WriteCredential(const wchar_t* target, const std::wstring& value) {
     credential.CredentialBlobSize = static_cast<DWORD>(bytes.size());
     credential.CredentialBlob = reinterpret_cast<LPBYTE>(bytes.data());
     credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
-    credential.UserName = const_cast<LPWSTR>(L"Lingolite");
+    credential.UserName = const_cast<LPWSTR>(L"Mote");
     CredWriteW(&credential, 0);
 }
 
@@ -197,8 +213,23 @@ void LoadConfig() {
         }
     }
 
-    g_config.aiKey = ReadCredential(L"Lingolite/AI");
-    g_config.baiduKey = ReadCredential(L"Lingolite/Baidu");
+    g_config.aiKey = ReadCredential(L"Mote/AI");
+    g_config.baiduKey = ReadCredential(L"Mote/Baidu");
+
+    if (g_config.aiKey.empty()) {
+        const std::wstring legacy = ReadCredential(L"Lingo" L"lite/AI");
+        if (!legacy.empty()) {
+            g_config.aiKey = legacy;
+            WriteCredential(L"Mote/AI", legacy);
+        }
+    }
+    if (g_config.baiduKey.empty()) {
+        const std::wstring legacy = ReadCredential(L"Lingo" L"lite/Baidu");
+        if (!legacy.empty()) {
+            g_config.baiduKey = legacy;
+            WriteCredential(L"Mote/Baidu", legacy);
+        }
+    }
 }
 
 void SaveConfig() {
@@ -215,8 +246,8 @@ void SaveConfig() {
     root.SetNamedValue(L"temperature", JsonValue::CreateNumberValue(g_config.temperature));
 
     WriteUtf8(ConfigPath(), winrt::to_string(root.Stringify()));
-    WriteCredential(L"Lingolite/AI", g_config.aiKey);
-    WriteCredential(L"Lingolite/Baidu", g_config.baiduKey);
+    WriteCredential(L"Mote/AI", g_config.aiKey);
+    WriteCredential(L"Mote/Baidu", g_config.baiduKey);
 }
 
 void LoadHistory() {

@@ -1,4 +1,4 @@
-# Lingolite 技术方案
+# Mote 技术方案
 
 ## 目标
 

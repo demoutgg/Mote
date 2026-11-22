@@ -24,7 +24,7 @@ security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD"
 3. 配置公证凭据：
 
 ```bash
-xcrun notarytool store-credentials "lingolite-notary" \
+xcrun notarytool store-credentials "mote-notary" \
   --apple-id "you@example.com" \
   --team-id "TEAMID" \
   --password "app-specific-password"
@@ -34,8 +34,8 @@ xcrun notarytool store-credentials "lingolite-notary" \
 
 ```bash
 CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
-NOTARY_PROFILE="lingolite-notary" \
-VERSION=0.7.3 \
+NOTARY_PROFILE="mote-notary" \
+VERSION=0.8.0 \
 ./macos/scripts/package.sh
 ```
 
@@ -50,7 +50,7 @@ VERSION=0.7.3 \
 ```powershell
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
   /f cert.pfx /p "$env:CERT_PASSWORD" `
-  build\Release\Lingolite.exe
+  build\Release\Mote.exe
 ```
 
 没有证书时 exe 未签名，SmartScreen 会提示；可先点“更多信息 → 仍要运行”。
@@ -62,8 +62,8 @@ signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
 ### 自动（推荐）
 
 ```bash
-git tag v0.7.3
-git push origin v0.7.3
+git tag v0.8.0
+git push origin v0.8.0
 ```
 
 `.github/workflows/release.yml` 会：
@@ -77,11 +77,11 @@ git push origin v0.7.3
 ### 手动
 
 ```bash
-gh release create v0.7.3 \
-  macos/dist/release/Lingolite-0.7.3-macos.dmg \
-  macos/dist/release/Lingolite-0.7.3-macos.zip \
-  dist/Lingolite-0.7.3-windows-x64.zip \
-  --draft --title "Lingolite 0.7.3" --notes-file RELEASE_NOTES.md
+gh release create v0.8.0 \
+  macos/dist/release/Mote-0.8.0-macos.dmg \
+  macos/dist/release/Mote-0.8.0-macos.zip \
+  dist/Mote-0.8.0-windows-x64.zip \
+  --draft --title "Mote 0.8.0" --notes-file RELEASE_NOTES.md
 ```
 
 ## 自动化签名（可选）

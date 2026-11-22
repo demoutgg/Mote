@@ -252,7 +252,7 @@ func writePNG(pixels: Int, name: String) throws {
         bytesPerRow: 0,
         bitsPerPixel: 0
     ) else {
-        throw NSError(domain: "LingoliteIcon", code: 1)
+        throw NSError(domain: "MoteIcon", code: 1)
     }
     rep.size = NSSize(width: pixels, height: pixels)
 
@@ -262,7 +262,7 @@ func writePNG(pixels: Int, name: String) throws {
     NSGraphicsContext.restoreGraphicsState()
 
     guard let data = rep.representation(using: .png, properties: [:]) else {
-        throw NSError(domain: "LingoliteIcon", code: 2)
+        throw NSError(domain: "MoteIcon", code: 2)
     }
     try data.write(to: iconset.appendingPathComponent(name))
 }

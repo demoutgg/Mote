@@ -227,7 +227,7 @@ HttpResult HttpRequest(
     }
 
     HINTERNET session = WinHttpOpen(
-        L"Lingolite/0.3",
+        L"Mote/0.3",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
         WINHTTP_NO_PROXY_NAME,
         WINHTTP_NO_PROXY_BYPASS,
