@@ -281,9 +281,12 @@ final class PopupContentView: NSView, NSTextViewDelegate {
             }
             .store(in: &cancellables)
 
+        // 流式输出每个 token 都会发布一次，按 60ms 合批，避免高频重建富文本
         model.$results
+            .collect(.byTime(RunLoop.main, .milliseconds(60)))
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] batches in
+                guard batches.last != nil else { return }
                 self?.updateResults()
             }
             .store(in: &cancellables)
@@ -345,7 +348,7 @@ final class PopupContentView: NSView, NSTextViewDelegate {
         let width = bounds.width
         let height = bounds.height
         let buttonSize: CGFloat = 24
-        let topHeight: CGFloat = 44
+        let topHeight: CGFloat = 36
 
         iconView.frame = NSRect(x: padding, y: (topHeight - 22) / 2, width: 22, height: 22)
         closeButton.frame = NSRect(
@@ -373,7 +376,7 @@ final class PopupContentView: NSView, NSTextViewDelegate {
             height: 24
         )
 
-        let headerY = topHeight + 12
+        let headerY = topHeight + 8
         sourceLabel.frame = NSRect(x: padding, y: headerY, width: 80, height: 16)
         clearButton.frame = NSRect(
             x: width - padding - 44,
@@ -536,16 +539,25 @@ final class PopupContentView: NSView, NSTextViewDelegate {
 
     /// 多服务结果之间的分隔线：NSTextBlock 的边线在 NSTextView 里画不出来，
     /// 改成 1pt 高的可拉伸图片附件，宽度随版心变化时由 layout() 更新。
-    private func sectionDivider() -> (NSAttributedString, NSTextAttachment) {
-        let width = dividerWidth()
-        let rule = NSImage(size: NSSize(width: 1, height: 1), flipped: false) { rect in
+    /// 线只建一次图案：流式输出会反复重建富文本，每次新建 NSImage 会白白攒位图
+    private static let dividerImage: NSImage = {
+        let image = NSImage(size: NSSize(width: 1, height: 1), flipped: false) { rect in
             Theme.separator.setFill()
             rect.fill()
             return true
         }
+        // 不缓存位图，深浅色切换时 drawingHandler 才会重新取色
+        image.cacheMode = .never
+        return image
+    }()
+
+    private func sectionDivider() -> (NSAttributedString, NSTextAttachment) {
+        let width = dividerWidth()
         let attachment = NSTextAttachment()
-        attachment.image = rule
-        attachment.bounds = NSRect(x: 0, y: 0, width: width, height: 1)
+        attachment.image = Self.dividerImage
+        // 行首自带 lineFragmentPadding，附件左移同样的距离才能和版心左右对齐
+        let padding = resultTextView.textContainer?.lineFragmentPadding ?? 0
+        attachment.bounds = NSRect(x: -padding, y: 0, width: width, height: 1)
 
         let style = NSMutableParagraphStyle()
         style.paragraphSpacingBefore = Theme.Spacing.m

@@ -29,17 +29,23 @@ final class RecorderView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         installLabelIfNeeded()
 
-        // 和卡片一样不描边：靠填充色差表示这里是可点的输入位
+        // 与同排的数值输入框保持一套观感：白底 + 1pt 细边，录制中换成强调色底色
         let path = NSBezierPath(
-            roundedRect: bounds,
+            roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
             xRadius: Theme.Radius.small,
             yRadius: Theme.Radius.small
         )
-        (isRecording
-            ? NSColor.controlAccentColor.withAlphaComponent(0.14)
-            : Theme.wellFill
-        ).setFill()
-        path.fill()
+        if isRecording {
+            NSColor.controlAccentColor.withAlphaComponent(0.14).setFill()
+            path.fill()
+            NSColor.controlAccentColor.withAlphaComponent(0.55).setStroke()
+        } else {
+            NSColor.textBackgroundColor.setFill()
+            path.fill()
+            Theme.separator.setStroke()
+        }
+        path.lineWidth = 1
+        path.stroke()
     }
 
     override func mouseDown(with event: NSEvent) {

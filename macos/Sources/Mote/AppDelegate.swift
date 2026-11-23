@@ -154,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 状态栏菜单弹出时应用未激活，菜单项的 ⌘ 快捷键不会生效，只留标题
         menu.addItem(menuItem(title: "设置", action: #selector(openSettings)))
         menu.addItem(.separator())
-        menu.addItem(menuItem(title: "关于 Mote", action: #selector(showAbout)))
+        // 关于信息已并入设置页的「关于」分页，这里不再重复
         menu.addItem(menuItem(title: "退出 Mote", action: #selector(quit), keyEquivalent: "q"))
         item.menu = menu
     }

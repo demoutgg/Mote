@@ -144,6 +144,11 @@ final class FormPane: NSView {
         return card
     }
 
+    /// 放入不套卡片的整块内容（如关于页的居中图标区）
+    func addBlock(_ view: NSView) {
+        addFullWidth(view)
+    }
+
     private func addFullWidth(_ view: NSView) {
         stack.addArrangedSubview(view)
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -293,6 +298,27 @@ enum FormRow {
         toggle.target = target
         toggle.action = action
         return toggle
+    }
+
+    /// 与滑块并排的数值输入框：既能拖动也能直接键入精确值
+    static func valueField(
+        _ text: String,
+        width: CGFloat = 52,
+        target: AnyObject?,
+        action: Selector
+    ) -> NSTextField {
+        let field = NSTextField(string: text)
+        field.font = Theme.Font.monoDigits
+        field.alignment = .right
+        field.controlSize = .small
+        field.bezelStyle = .roundedBezel
+        field.target = target
+        field.action = action
+        // 回车和失焦都提交，避免用户输入后直接点保存被丢掉
+        field.cell?.sendsActionOnEndEditing = true
+        field.translatesAutoresizingMaskIntoConstraints = false
+        field.widthAnchor.constraint(equalToConstant: width).isActive = true
+        return field
     }
 
     static func valueLabel(_ text: String, width: CGFloat = 52) -> NSTextField {

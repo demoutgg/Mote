@@ -23,32 +23,37 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var draftKey = ""
     private var draftBaiduKey = ""
 
-    /// 分页由窗口工具栏的图标项承载，按顺序对应 panes
-    private static let paneTabs: [(id: NSToolbarItem.Identifier, label: String, symbol: String)] = [
-        (NSToolbarItem.Identifier("pane.general"), "通用", "gearshape"),
-        (NSToolbarItem.Identifier("pane.services"), "服务", "cloud"),
-        (NSToolbarItem.Identifier("pane.translation"), "翻译", "character.bubble"),
-        (NSToolbarItem.Identifier("pane.history"), "历史", "clock.arrow.circlepath"),
+    /// 顶部分页导航，按顺序对应 panes；标题行显示的也是这里的 label
+    private static let paneTabs: [(label: String, symbol: String)] = [
+        ("通用", "gearshape"),
+        ("服务", "cloud"),
+        ("翻译", "character.bubble"),
+        ("历史", "clock.arrow.circlepath"),
+        ("关于", "info.circle"),
     ]
+    private let titleLabel = NSTextField(labelWithString: "Mote 设置")
+    private let tabBar = SettingsTabBar(items: SettingsWindowController.paneTabs.map {
+        SettingsTabBar.Item(label: $0.label, symbol: $0.symbol)
+    })
     private let warningLabel = NSTextField(labelWithString: "")
     private let saveButton = NSButton()
     private let cancelButton = NSButton()
     /// 历史分页专用：底部条只保留「清空」
     private let footerClearButton = NSButton()
+    private let footerSeparator = SeparatorView()
     private var savedHintWorkItem: DispatchWorkItem?
     /// 上次保存时的开机自启状态，未保存就关窗时用它回滚
     private var savedLaunchAtLogin = false
 
     // 权限
-    private var permissionStatus: [PermissionKind: NSTextField] = [:]
-    private var permissionButtons: [PermissionKind: NSButton] = [:]
+    private var permissionBanner: NSView?
 
     // 通用
     private var recorders: [RecorderView] = []
-    private var widthSlider: NSSlider!
-    private var widthValue: NSTextField!
-    private var heightSlider: NSSlider!
-    private var heightValue: NSTextField!
+    private var widthField: NSTextField!
+    private var widthStepper: NSStepper!
+    private var heightField: NSTextField!
+    private var heightStepper: NSStepper!
     private var statusIconField: NSTextField!
     private var statusIconPopup: NSPopUpButton!
     private var statusIconItems: [String] = []
@@ -88,11 +93,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         super.init()
     }
 
-    /// 开发用：直接打开指定分页（0 通用 / 1 服务 / 2 翻译 / 3 历史），便于截图核对样式
+    /// 开发用：直接打开指定分页（0 通用 / 1 服务 / 2 翻译 / 3 历史 / 4 关于），便于截图核对样式
     func show(pane index: Int) {
         show()
         guard index >= 0, index < panes.count else { return }
-        window?.toolbar?.selectedItemIdentifier = Self.paneTabs[index].id
         selectPane(index)
     }
 
@@ -111,19 +115,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let window = SettingsWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 620),
-            styleMask: [.titled, .closable, .miniaturizable],
+            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         window.title = "Mote 设置"
         window.isReleasedWhenClosed = false
         window.delegate = self
-        // 分页做成工具栏里的图标项：preference 样式居中排列，标题栏不再重复显示标题
-        window.toolbar = makeToolbar()
-        window.toolbarStyle = .preference
+        // 标题行和 Tab 行都自绘：内容延伸到标题栏，红绿灯仍是系统默认位置
+        window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.contentView = makeContentView()
-        window.toolbar?.selectedItemIdentifier = Self.paneTabs[0].id
         window.center()
         self.window = window
         session += 1
@@ -132,6 +134,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         AppActivation.activate(window)
         validate()
     }
+
 
     func windowWillClose(_ notification: Notification) {
         savedHintWorkItem?.cancel()
@@ -152,10 +155,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         container.subviews.forEach { $0.removeFromSuperview() }
         panes = []
         recorders = []
-        widthSlider = nil
-        widthValue = nil
-        heightSlider = nil
-        heightValue = nil
+        widthField = nil
+        widthStepper = nil
+        heightField = nil
+        heightStepper = nil
         statusIconField = nil
         statusIconPopup = nil
         statusIconItems = []
@@ -182,8 +185,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         promptTextView = nil
         promptToggleButton = nil
         promptRows = []
-        permissionStatus = [:]
-        permissionButtons = [:]
+        permissionBanner = nil
     }
 
     // MARK: - 窗口骨架
@@ -192,10 +194,18 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let content = NSView()
         content.wantsLayer = true
 
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.alignment = .center
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(titleLabel)
+
+        tabBar.onSelect = { [weak self] index in self?.selectPane(index) }
+        content.addSubview(tabBar)
+
         container.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(container)
 
-        let separator = SeparatorView()
+        let separator = footerSeparator
         separator.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(separator)
 
@@ -230,7 +240,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         content.addSubview(footerClearButton)
 
         NSLayoutConstraint.activate([
-            container.topAnchor.constraint(equalTo: content.topAnchor),
+            // 标题与红绿灯同一水平线，Tab 行紧随其下
+            titleLabel.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+            titleLabel.centerYAnchor.constraint(equalTo: content.topAnchor, constant: 20),
+
+            tabBar.topAnchor.constraint(equalTo: content.topAnchor, constant: 38),
+            tabBar.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+            tabBar.heightAnchor.constraint(equalToConstant: 56),
+
+            container.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
             container.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             container.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             container.bottomAnchor.constraint(equalTo: separator.topAnchor),
@@ -259,24 +277,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             makeServicesPane(),
             makeTranslationPane(),
             HistoryPane(store: history, showsHeader: false),
+            makeAboutPane(),
         ]
         selectPane(0)
         return content
-    }
-
-    private func makeToolbar() -> NSToolbar {
-        let toolbar = NSToolbar(identifier: "MoteSettingsToolbar")
-        toolbar.delegate = self
-        toolbar.displayMode = .iconAndLabel
-        toolbar.allowsUserCustomization = false
-        toolbar.autosavesConfiguration = false
-        return toolbar
-    }
-
-    @objc private func toolbarTabSelected(_ sender: NSToolbarItem) {
-        guard let index = Self.paneTabs.firstIndex(where: { $0.id == sender.itemIdentifier }) else { return }
-        window?.toolbar?.selectedItemIdentifier = sender.itemIdentifier
-        selectPane(index)
     }
 
     private func selectPane(_ index: Int) {
@@ -292,13 +296,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             pane.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
-        // 历史分页改不了设置：底部条只留「清空」，取消/保存隐藏
+        // 历史页只留「清空」，关于页整条底栏都不需要
         let isHistory = pane is HistoryPane
+        let isAbout = pane === panes.last
         footerClearButton.isHidden = !isHistory
-        cancelButton.isHidden = isHistory
-        saveButton.isHidden = isHistory
-        warningLabel.isHidden = isHistory
+        cancelButton.isHidden = isHistory || isAbout
+        saveButton.isHidden = isHistory || isAbout
+        warningLabel.isHidden = isHistory || isAbout
+        footerSeparator.isHidden = isAbout
 
+        titleLabel.stringValue = "Mote 设置 · \(Self.paneTabs[index].label)"
+        tabBar.select(index)
         container.layoutSubtreeIfNeeded()
         resizeWindow()
         (pane as? FormPane)?.scrollToTop()
@@ -329,31 +337,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private func makeGeneralPane() -> NSView {
         let pane = FormPane()
 
-        // 权限放最前：没授权时这里是唯一的常驻入口
-        pane.addTitle("权限")
-        var permissionRows: [NSView] = []
-        for (index, kind) in PermissionKind.allCases.enumerated() {
-            let granted = kind.isGranted
-            let status = FormRow.valueLabel(granted ? "已授权" : "未授权", width: 56)
-            status.textColor = granted ? .systemGreen : .systemOrange
-            let button = FormRow.button(
-                granted ? "已授权" : "授权",
-                target: self,
-                action: #selector(grantPermission(_:))
-            )
-            button.tag = index
-            button.isHidden = granted
-            permissionStatus[kind] = status
-            permissionButtons[kind] = button
-
-            let spacer = NSView()
-            spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            let group = FormRow.trailing([spacer, status, button])
-            permissionRows.append(
-                FormRow.make(title: kind.title, detail: kind.detail, accessory: group)
-            )
-        }
-        pane.addCard(permissionRows)
+        // 权限提醒只在缺权限时出现，全部授权后整张卡片收起
+        let bannerButton = FormRow.button("去授权", target: self, action: #selector(openPermissionGuide))
+        permissionBanner = pane.addCard([
+            FormRow.make(
+                title: "尚未获得系统权限",
+                detail: "辅助功能用于读取选中文本，屏幕录制用于截图翻译；不授权时对应操作会先提示。",
+                accessory: bannerButton
+            ),
+        ])
 
         pane.addTitle("启动")
         let launchSwitch = FormRow.switchButton(
@@ -410,19 +402,32 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         pane.addCard(shortcutRows)
 
         pane.addTitle("弹窗")
-        widthSlider = NSSlider(value: draft.popupWidth, minValue: 460, maxValue: 900, target: self, action: #selector(sliderChanged(_:)))
-        widthSlider.tag = ControlTag.popupWidth
-        widthValue = FormRow.valueLabel("\(Int(draft.popupWidth)) pt")
-        heightSlider = NSSlider(value: draft.popupHeight, minValue: 340, maxValue: 800, target: self, action: #selector(sliderChanged(_:)))
-        heightSlider.tag = ControlTag.popupHeight
-        heightValue = FormRow.valueLabel("\(Int(draft.popupHeight)) pt")
+        widthField = FormRow.valueField(
+            "\(Int(draft.popupWidth))",
+            width: 64,
+            target: self,
+            action: #selector(dimensionChanged(_:))
+        )
+        widthField.tag = ControlTag.popupWidth
+        widthField.formatter = dimensionFormatter()
+        widthStepper = dimensionStepper(value: draft.popupWidth, min: 460, max: 900, tag: ControlTag.popupWidth)
+        heightField = FormRow.valueField(
+            "\(Int(draft.popupHeight))",
+            width: 64,
+            target: self,
+            action: #selector(dimensionChanged(_:))
+        )
+        heightField.tag = ControlTag.popupHeight
+        heightField.formatter = dimensionFormatter()
+        heightStepper = dimensionStepper(value: draft.popupHeight, min: 340, max: 800, tag: ControlTag.popupHeight)
 
         pane.addCard([
-            sliderRow(title: "宽度", slider: widthSlider, value: widthValue),
-            sliderRow(title: "高度", slider: heightSlider, value: heightValue),
+            dimensionRow(title: "宽度", field: widthField, stepper: widthStepper, unit: "pt（460–900）"),
+            dimensionRow(title: "高度", field: heightField, stepper: heightStepper, unit: "pt（340–800）"),
             FormRow.noteRow("也可以在弹窗右下角拖动调整，位置会自动记住。"),
         ])
 
+        // 菜单栏图标改动最直观，放在弹窗设置之后单独一节
         pane.addTitle("外观")
         statusIconPopup = FormRow.popup(width: 120)
         // 菜单项与 statusIconItems 一一对应：自定义符号追加一项，末项是「显示“译”字」（空字符串）
@@ -453,19 +458,63 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             FormRow.noteRow("留空显示“译”字；支持任意 SF Symbols 名称。"),
         ])
 
-        pane.addTitle("关于")
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+        updateIconPreview(draft.statusIcon)
+        refreshPermissionBanner()
+        return pane
+    }
+
+    private func makeAboutPane() -> NSView {
+        let pane = FormPane()
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+        let build = info?["CFBundleVersion"] as? String ?? ""
+
+        // 上半部照系统「关于」面板排：大图标、名称、版本、一句话定位，全部居中
+        let icon = NSImageView()
+        icon.image = NSApp.applicationIconImage
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.widthAnchor.constraint(equalToConstant: 88).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 88).isActive = true
+
+        let name = NSTextField(labelWithString: "Mote")
+        name.font = .systemFont(ofSize: 22, weight: .semibold)
+        name.alignment = .center
+
+        let versionLabel = NSTextField(labelWithString: "版本 \(version)（\(build)）")
+        versionLabel.font = Theme.Font.footnote
+        versionLabel.textColor = .secondaryLabelColor
+        versionLabel.alignment = .center
+
+        let tagline = NSTextField(labelWithString: "轻量、原生的 AI 翻译工具")
+        tagline.font = Theme.Font.body
+        tagline.alignment = .center
+
+        let hero = NSStackView(views: [icon, name, versionLabel, tagline])
+        hero.orientation = .vertical
+        hero.alignment = .centerX
+        hero.spacing = 6
+        hero.setCustomSpacing(Theme.Spacing.l, after: icon)
+        hero.edgeInsets = NSEdgeInsets(top: 28, left: 0, bottom: 24, right: 0)
+        hero.translatesAutoresizingMaskIntoConstraints = false
+        pane.addBlock(hero)
+
+        pane.addTitle("链接")
         let link = NSButton(title: "github.com/demoutgg/Mote", target: self, action: #selector(openRepo))
         link.isBordered = false
         link.contentTintColor = .linkColor
         link.font = Theme.Font.footnote
         pane.addCard([
-            FormRow.make(title: "Mote", accessory: valueText(version)),
             linkRow(link),
-            FormRow.noteRow("翻译在本地发起，不经过 Mote 服务器；不收集遥测。"),
+            FormRow.noteRow("问题反馈与新版本都在这里。"),
         ])
 
-        updateIconPreview(draft.statusIcon)
+        pane.addTitle("隐私")
+        pane.addCard([
+            FormRow.make(title: "翻译请求", detail: "直接发往你配置的服务商", accessory: valueText("本地直连")),
+            FormRow.make(title: "数据收集", detail: "不收集遥测，历史记录只存在本机", accessory: valueText("无")),
+        ])
+
         return pane
     }
 
@@ -477,6 +526,46 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         accessory.alignment = .centerY
         accessory.spacing = 10
         return FormRow.make(title: title, accessory: accessory)
+    }
+
+    /// 尺寸行：输入框 + 步进，不依赖滑块条的长度表达数值
+    private func dimensionRow(
+        title: String,
+        field: NSTextField,
+        stepper: NSStepper,
+        unit: String
+    ) -> NSView {
+        let unitLabel = NSTextField(labelWithString: unit)
+        unitLabel.font = Theme.Font.footnote
+        unitLabel.textColor = .secondaryLabelColor
+        let accessory = NSStackView(views: [field, stepper, unitLabel])
+        accessory.orientation = .horizontal
+        accessory.alignment = .centerY
+        accessory.spacing = Theme.Spacing.m
+        return FormRow.make(title: title, accessory: accessory)
+    }
+
+    private func dimensionStepper(value: Double, min: Double, max: Double, tag: Int) -> NSStepper {
+        let stepper = NSStepper()
+        stepper.minValue = min
+        stepper.maxValue = max
+        stepper.increment = 10
+        stepper.doubleValue = value
+        stepper.valueWraps = false
+        stepper.autorepeat = true
+        stepper.tag = tag
+        stepper.target = self
+        stepper.action = #selector(dimensionChanged(_:))
+        return stepper
+    }
+
+    private func dimensionFormatter() -> NumberFormatter {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .none
+        formatter.allowsFloats = false
+        formatter.minimum = 0
+        formatter.maximum = 1000
+        return formatter
     }
 
     private func linkRow(_ button: NSButton) -> NSView {
@@ -648,7 +737,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         pane.addTitle("AI 参数")
         temperatureSlider = NSSlider(value: draft.temperature, minValue: 0, maxValue: 1, target: self, action: #selector(sliderChanged(_:)))
         temperatureSlider.tag = ControlTag.temperature
-        temperatureValue = FormRow.valueLabel(String(format: "%.2f", draft.temperature))
+        temperatureValue = FormRow.valueField(
+            String(format: "%.2f", draft.temperature),
+            target: self,
+            action: #selector(temperatureFieldChanged(_:))
+        )
+        temperatureValue.formatter = temperatureFormatter()
         pane.addCard([sliderRow(title: "随机性", slider: temperatureSlider, value: temperatureValue)])
 
         let toggle = FormRow.button("展开", target: self, action: #selector(togglePrompt))
@@ -722,18 +816,49 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     @objc private func sliderChanged(_ sender: NSSlider) {
         switch sender.tag {
-        case ControlTag.popupWidth:
-            draft.popupWidth = sender.doubleValue
-            widthValue.stringValue = "\(Int(sender.doubleValue)) pt"
-        case ControlTag.popupHeight:
-            draft.popupHeight = sender.doubleValue
-            heightValue.stringValue = "\(Int(sender.doubleValue)) pt"
         case ControlTag.temperature:
             draft.temperature = sender.doubleValue
             temperatureValue.stringValue = String(format: "%.2f", sender.doubleValue)
         default:
             break
         }
+    }
+
+    /// 弹窗宽高：输入框与步进共用同一个入口，越界按边界取值
+    @objc private func dimensionChanged(_ sender: NSControl) {
+        let isWidth = sender.tag == ControlTag.popupWidth
+        let lower: Double = isWidth ? 460 : 340
+        let upper: Double = isWidth ? 900 : 800
+        let value = min(max(sender.doubleValue.rounded(), lower), upper)
+
+        if isWidth {
+            draft.popupWidth = value
+            widthField.stringValue = "\(Int(value))"
+            widthStepper.doubleValue = value
+        } else {
+            draft.popupHeight = value
+            heightField.stringValue = "\(Int(value))"
+            heightStepper.doubleValue = value
+        }
+        validate()
+    }
+
+    /// 直接键入随机性：与滑块双向同步，超范围按边界取值
+    @objc private func temperatureFieldChanged(_ sender: NSTextField) {
+        let value = min(max(sender.doubleValue, 0), 1)
+        draft.temperature = value
+        temperatureSlider.doubleValue = value
+        sender.stringValue = String(format: "%.2f", value)
+    }
+
+    private func temperatureFormatter() -> NumberFormatter {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        formatter.minimum = 0
+        formatter.maximum = 1
+        return formatter
     }
 
     @objc private func resetShortcut(_ sender: NSButton) {
@@ -1027,8 +1152,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         config.targetLanguage =
             languagePopup?.titleOfSelectedItem ?? draft.targetLanguage
         config.statusIcon = statusIconField?.stringValue ?? draft.statusIcon
-        config.popupWidth = widthSlider?.doubleValue ?? draft.popupWidth
-        config.popupHeight = heightSlider?.doubleValue ?? draft.popupHeight
+        config.popupWidth = widthField?.doubleValue ?? draft.popupWidth
+        config.popupHeight = heightField?.doubleValue ?? draft.popupHeight
         return config
     }
 
@@ -1080,26 +1205,18 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window?.close()
     }
 
-    @objc private func grantPermission(_ sender: NSButton) {
-        let kinds = PermissionKind.allCases
-        guard sender.tag >= 0, sender.tag < kinds.count else { return }
+    @objc private func openPermissionGuide() {
         // 和授权引导窗走同一条流程：登记系统权限、打开设置、贴浮条、轮询到授权自动收
-        PermissionGuideController.shared.guide(kinds[sender.tag])
+        PermissionGuideController.shared.show()
     }
 
-    /// 用户去系统设置勾选完回到 Mote，窗口重新获得焦点时刷新两行状态
-    private func refreshPermissions() {
-        for kind in PermissionKind.allCases {
-            let granted = kind.isGranted
-            permissionStatus[kind]?.stringValue = granted ? "已授权" : "未授权"
-            permissionStatus[kind]?.textColor = granted ? .systemGreen : .systemOrange
-            permissionButtons[kind]?.title = "授权"
-            permissionButtons[kind]?.isHidden = granted
-        }
+    /// 两项权限都拿到后，顶部提醒整条收起
+    private func refreshPermissionBanner() {
+        permissionBanner?.isHidden = PermissionKind.allCases.allSatisfy(\.isGranted)
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
-        refreshPermissions()
+        refreshPermissionBanner()
     }
 
     @objc private func clearHistoryFromFooter() {
@@ -1148,37 +1265,5 @@ extension SettingsWindowController: NSTextFieldDelegate {
               field === endpointField || field === modelField else { return }
         if field === endpointField { resetModelPicker() }
         validate()
-    }
-}
-
-
-extension SettingsWindowController: NSToolbarDelegate {
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        Self.paneTabs.map(\.id)
-    }
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        Self.paneTabs.map(\.id)
-    }
-
-    /// 声明为可选中的项，AppKit 才会画选中高亮
-    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        Self.paneTabs.map(\.id)
-    }
-
-    func toolbar(
-        _ toolbar: NSToolbar,
-        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
-        willBeInsertedIntoToolbar flag: Bool
-    ) -> NSToolbarItem? {
-        guard let tab = Self.paneTabs.first(where: { $0.id == itemIdentifier }) else { return nil }
-        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-        item.label = tab.label
-        item.paletteLabel = tab.label
-        item.image = NSImage(systemSymbolName: tab.symbol, accessibilityDescription: tab.label)
-        item.isBordered = false
-        item.target = self
-        item.action = #selector(toolbarTabSelected(_:))
-        return item
     }
 }
