@@ -29,23 +29,17 @@ final class RecorderView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         installLabelIfNeeded()
 
+        // 和卡片一样不描边：靠填充色差表示这里是可点的输入位
         let path = NSBezierPath(
-            roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
-            xRadius: 6,
-            yRadius: 6
+            roundedRect: bounds,
+            xRadius: Theme.Radius.small,
+            yRadius: Theme.Radius.small
         )
         (isRecording
             ? NSColor.controlAccentColor.withAlphaComponent(0.14)
-            : NSColor.quaternaryLabelColor.withAlphaComponent(0.08)
+            : Theme.wellFill
         ).setFill()
         path.fill()
-
-        (isRecording
-            ? NSColor.controlAccentColor
-            : NSColor.separatorColor.withAlphaComponent(0.6)
-        ).setStroke()
-        path.lineWidth = 1
-        path.stroke()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -95,7 +89,7 @@ final class RecorderView: NSView {
     /// 背景用 draw 画，文字交给 NSTextField：手写 NSString.draw 在翻转坐标里会画成倒的
     private func installLabelIfNeeded() {
         guard titleLabel.superview == nil else { return }
-        titleLabel.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
+        titleLabel.font = Theme.Font.mono
         titleLabel.alignment = .center
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)

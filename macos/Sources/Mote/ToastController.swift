@@ -10,12 +10,12 @@ final class ToastController {
         window?.orderOut(nil)
 
         let label = NSTextField(labelWithString: message)
-        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.font = Theme.Font.bodyStrong
         label.textColor = .white
         label.alignment = .center
         label.sizeToFit()
 
-        let padding = NSSize(width: 14, height: 9)
+        let padding = NSSize(width: Theme.Spacing.l, height: 9)
         let size = NSSize(
             width: max(label.frame.width + padding.width * 2, 70),
             height: label.frame.height + padding.height * 2

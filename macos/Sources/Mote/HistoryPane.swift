@@ -15,6 +15,8 @@ final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private var cancellables = Set<AnyCancellable>()
     private var filtered: [HistoryEntry] = []
 
+    private static let rowHeight: CGFloat = 54
+
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
@@ -39,17 +41,18 @@ final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
 
     private func setup() {
         let title = NSTextField(labelWithString: "历史记录")
-        title.font = .systemFont(ofSize: 15, weight: .semibold)
+        title.font = Theme.Font.title
         title.isHidden = !showsHeader
 
+        // 嵌在设置页时没有标题，把计数降级成小节标题，与「权限」「启动」同级
         let count = NSTextField(labelWithString: "最近 100 条")
-        count.font = .systemFont(ofSize: 11)
-        count.textColor = .tertiaryLabelColor
+        count.font = showsHeader ? Theme.Font.footnote : Theme.Font.section
+        count.textColor = showsHeader ? .tertiaryLabelColor : .secondaryLabelColor
 
         clearButton.title = "清空"
         clearButton.bezelStyle = .rounded
         clearButton.controlSize = .small
-        clearButton.font = .systemFont(ofSize: 11)
+        clearButton.font = Theme.Font.footnote
         clearButton.target = self
         clearButton.action = #selector(confirmClear)
         // 嵌在设置页时「清空」移到窗口底部按钮条，避免和「最近 100 条」挤在一行
@@ -65,7 +68,12 @@ final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         header.orientation = .horizontal
         header.alignment = .centerY
         header.spacing = 8
-        header.edgeInsets = NSEdgeInsets(top: 14, left: 20, bottom: 10, right: 20)
+        header.edgeInsets = NSEdgeInsets(
+            top: showsHeader ? 14 : 6,
+            left: 20,
+            bottom: showsHeader ? 10 : 8,
+            right: 20
+        )
         header.translatesAutoresizingMaskIntoConstraints = false
         addSubview(header)
 
@@ -87,18 +95,14 @@ final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         ])
 
         searchField.placeholderString = "搜索原文或译文"
-        searchField.font = .systemFont(ofSize: 12)
+        searchField.font = Theme.Font.body
         searchField.target = self
         searchField.action = #selector(searchChanged)
         searchField.sendsSearchStringImmediately = true
         searchField.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(searchField)
 
-        let divider = NSView()
-        divider.wantsLayer = true
-        divider.layer?.backgroundColor = NSColor.separatorColor
-            .withAlphaComponent(0.45)
-            .cgColor
+        let divider = SeparatorView()
         divider.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(divider)
 
@@ -106,10 +110,13 @@ final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         column.resizingMask = .autoresizingMask
         tableView.addTableColumn(column)
         tableView.headerView = nil
-        tableView.rowHeight = 52
+        tableView.rowHeight = Self.rowHeight
         tableView.intercellSpacing = .zero
         tableView.backgroundColor = .clear
         tableView.selectionHighlightStyle = .regular
+        // 默认的 .automatic 会按 inset 风格再缩一圈，行内容左右比搜索框多出 14pt
+        tableView.style = .plain
+        tableView.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         tableView.dataSource = self
         tableView.delegate = self
         tableView.target = self
@@ -123,7 +130,7 @@ final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         scroll.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(scroll)
 
-        emptyLabel.font = .systemFont(ofSize: 12)
+        emptyLabel.font = Theme.Font.body
         emptyLabel.textColor = .tertiaryLabelColor
         emptyLabel.alignment = .center
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -134,9 +141,9 @@ final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
             searchField.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
             searchField.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
 
-            divider.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 9),
-            divider.leadingAnchor.constraint(equalTo: card.leadingAnchor),
-            divider.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            divider.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: Theme.Spacing.m),
+            divider.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Theme.Spacing.l),
+            divider.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Theme.Spacing.l),
             divider.heightAnchor.constraint(equalToConstant: 1),
 
             scroll.topAnchor.constraint(equalTo: divider.bottomAnchor),
@@ -211,7 +218,7 @@ final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        52
+        Self.rowHeight
     }
 
     @objc private func searchChanged() {
@@ -269,21 +276,21 @@ private final class HistoryCell: NSTableCellView {
     private let sourceLabel = NSTextField(labelWithString: "")
     private let dateLabel = NSTextField(labelWithString: "")
     private let targetLabel = NSTextField(labelWithString: "")
-    private let separator = NSView()
+    private let separator = SeparatorView()
 
     init(identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
         self.identifier = identifier
 
-        sourceLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        sourceLabel.font = Theme.Font.bodyStrong
         sourceLabel.lineBreakMode = .byTruncatingTail
         sourceLabel.maximumNumberOfLines = 1
         sourceLabel.usesSingleLineMode = true
-        dateLabel.font = .systemFont(ofSize: 10)
+        dateLabel.font = Theme.Font.monoDigits
         dateLabel.textColor = .tertiaryLabelColor
         dateLabel.alignment = .right
         targetLabel.lineBreakMode = .byTruncatingTail
-        targetLabel.font = .systemFont(ofSize: 12)
+        targetLabel.font = Theme.Font.body
         targetLabel.textColor = .secondaryLabelColor
         targetLabel.maximumNumberOfLines = 1
         targetLabel.usesSingleLineMode = true
@@ -293,28 +300,24 @@ private final class HistoryCell: NSTableCellView {
             addSubview(view)
         }
 
-        separator.wantsLayer = true
-        separator.layer?.backgroundColor = NSColor.separatorColor
-            .withAlphaComponent(0.25)
-            .cgColor
         separator.translatesAutoresizingMaskIntoConstraints = false
         addSubview(separator)
 
         NSLayoutConstraint.activate([
-            sourceLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-            sourceLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            sourceLabel.trailingAnchor.constraint(lessThanOrEqualTo: dateLabel.leadingAnchor, constant: -8),
+            sourceLabel.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+            sourceLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Theme.Spacing.l),
+            sourceLabel.trailingAnchor.constraint(lessThanOrEqualTo: dateLabel.leadingAnchor, constant: -Theme.Spacing.s),
 
             dateLabel.centerYAnchor.constraint(equalTo: sourceLabel.centerYAnchor),
-            dateLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            dateLabel.widthAnchor.constraint(equalToConstant: 90),
+            dateLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Theme.Spacing.l),
+            dateLabel.widthAnchor.constraint(equalToConstant: 96),
 
-            targetLabel.topAnchor.constraint(equalTo: sourceLabel.bottomAnchor, constant: 3),
-            targetLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            targetLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            targetLabel.topAnchor.constraint(equalTo: sourceLabel.bottomAnchor, constant: Theme.Spacing.xs),
+            targetLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Theme.Spacing.l),
+            targetLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Theme.Spacing.l),
 
-            separator.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            separator.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            separator.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Theme.Spacing.l),
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Theme.Spacing.l),
             separator.bottomAnchor.constraint(equalTo: bottomAnchor),
             separator.heightAnchor.constraint(equalToConstant: 1),
         ])
@@ -332,7 +335,7 @@ private final class HistoryCell: NSTableCellView {
         let text = NSMutableAttributedString(
             string: target,
             attributes: [
-                .font: NSFont.systemFont(ofSize: 12),
+                .font: Theme.Font.body,
                 .foregroundColor: NSColor.secondaryLabelColor,
             ]
         )
@@ -340,7 +343,7 @@ private final class HistoryCell: NSTableCellView {
             text.append(NSAttributedString(
                 string: "  · " + extra,
                 attributes: [
-                    .font: NSFont.systemFont(ofSize: 10),
+                    .font: Theme.Font.footnote,
                     .foregroundColor: NSColor.tertiaryLabelColor,
                 ]
             ))

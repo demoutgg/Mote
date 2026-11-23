@@ -9,7 +9,7 @@ final class PopupContentView: NSView, NSTextViewDelegate {
     private let onOpenSettings: () -> Void
     private let onOpenHistory: () -> Void
 
-    private let background = NSView()
+    private let background = FillView()
     private let iconView = NSImageView()
     private let languageButton = NSPopUpButton(frame: .zero, pullsDown: false)
     private let historyButton = NSButton()
@@ -18,25 +18,25 @@ final class PopupContentView: NSView, NSTextViewDelegate {
 
     private let sourceLabel = NSTextField(labelWithString: "原文")
     private let clearButton = NSButton()
-    private let sourceCard = NSView()
+    private let sourceCard = FillView()
     private let sourceScroll = NSScrollView()
     private let sourceTextView = PlaceholderTextView()
 
-    private let translateButton = NSButton()
+    private let translateButton = PrimaryButton()
     private let statusLabel = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
     private let errorLabel = NSTextField(labelWithString: "")
 
     private let resultLabel = NSTextField(labelWithString: "译文")
     private let copyButton = NSButton()
-    private let resultCard = NSView()
+    private let resultCard = FillView()
     private let resultScroll = NSScrollView()
     private let resultTextView = NSTextView()
 
-    private var badges: [BadgeView] = []
-    private var resultRanges: [String: NSRange] = [:]
     private var copyMenuShown = false
     private var didScrollForRun = false
+    private var dividerAttachments: [(NSTextAttachment, Int)] = []
+    private var dividerBuiltWidth: CGFloat = 0
     private var cancellables = Set<AnyCancellable>()
 
     override var isFlipped: Bool { true }
@@ -70,16 +70,14 @@ final class PopupContentView: NSView, NSTextViewDelegate {
     private func setup() {
         wantsLayer = true
 
-        background.wantsLayer = true
-        background.layer?.cornerRadius = 16
-        background.layer?.masksToBounds = true
-        background.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        background.fill = .windowBackgroundColor
+        background.cornerRadius = Theme.Radius.popup
         addSubview(background)
 
         iconView.image = NSApp.applicationIconImage
         iconView.imageScaling = .scaleProportionallyDown
         iconView.wantsLayer = true
-        iconView.layer?.cornerRadius = 6
+        iconView.layer?.cornerRadius = Theme.Radius.small
         iconView.layer?.masksToBounds = true
         addSubview(iconView)
 
@@ -93,7 +91,7 @@ final class PopupContentView: NSView, NSTextViewDelegate {
                 : store.config.targetLanguage
         )
         languageButton.controlSize = .small
-        languageButton.font = .systemFont(ofSize: 11)
+        languageButton.font = Theme.Font.footnote
         languageButton.target = self
         languageButton.action = #selector(languageChanged)
         languageButton.toolTip = "目标语言"
@@ -111,13 +109,13 @@ final class PopupContentView: NSView, NSTextViewDelegate {
         closeButton.toolTip = "关闭（Esc）"
         addSubview(closeButton)
 
-        sourceLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        sourceLabel.font = Theme.Font.footnote
         sourceLabel.textColor = .secondaryLabelColor
         addSubview(sourceLabel)
 
         clearButton.title = "清空"
         clearButton.isBordered = false
-        clearButton.font = .systemFont(ofSize: 10)
+        clearButton.font = Theme.Font.caption
         clearButton.contentTintColor = .tertiaryLabelColor
         clearButton.target = self
         clearButton.action = #selector(clearSource)
@@ -129,18 +127,21 @@ final class PopupContentView: NSView, NSTextViewDelegate {
         addSubview(sourceCard)
 
         translateButton.title = "翻译"
-        translateButton.bezelStyle = .rounded
-        translateButton.controlSize = .small
-        translateButton.font = .systemFont(ofSize: 12, weight: .medium)
-        // 输入框里按 ↩ 就是翻译，按钮做成主操作用的强调色，快捷键放 tooltip
-        translateButton.bezelColor = .controlAccentColor
-        translateButton.contentTintColor = .white
+        // 白色符号直接画进自绘按钮，模板图在自绘里没法染色
+        translateButton.image = NSImage(
+            systemSymbolName: "sparkles",
+            accessibilityDescription: nil
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+                .applying(.init(paletteColors: [.white]))
+        )
+        // 输入框里按 ↩ 就是翻译，按钮做成主操作，快捷键放 tooltip
         translateButton.toolTip = "翻译（↩）"
         translateButton.target = self
         translateButton.action = #selector(translate)
         addSubview(translateButton)
 
-        statusLabel.font = .systemFont(ofSize: 11)
+        statusLabel.font = Theme.Font.footnote
         statusLabel.textColor = .tertiaryLabelColor
         addSubview(statusLabel)
 
@@ -150,19 +151,19 @@ final class PopupContentView: NSView, NSTextViewDelegate {
         spinner.isHidden = true
         addSubview(spinner)
 
-        errorLabel.font = .systemFont(ofSize: 11)
+        errorLabel.font = Theme.Font.footnote
         errorLabel.textColor = .systemOrange
         errorLabel.lineBreakMode = .byTruncatingTail
         errorLabel.isHidden = true
         addSubview(errorLabel)
 
-        resultLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        resultLabel.font = Theme.Font.footnote
         resultLabel.textColor = .secondaryLabelColor
         addSubview(resultLabel)
 
         copyButton.title = "复制"
         copyButton.isBordered = false
-        copyButton.font = .systemFont(ofSize: 10)
+        copyButton.font = Theme.Font.caption
         copyButton.contentTintColor = .secondaryLabelColor
         copyButton.target = self
         copyButton.action = #selector(copyResult)
@@ -180,16 +181,15 @@ final class PopupContentView: NSView, NSTextViewDelegate {
         updateCopyTitle()
     }
 
-    private func configureCard(_ card: NSView) {
-        card.wantsLayer = true
-        card.layer?.cornerRadius = 10
-        card.layer?.masksToBounds = true
-        card.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+    private func configureCard(_ card: FillView) {
+        card.fill = .textBackgroundColor
+        card.cornerRadius = Theme.Radius.medium
     }
 
     private func configureIconButton(_ button: NSButton, symbol: String, action: Selector) {
         button.isBordered = false
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 13, weight: .regular))
         button.imageScaling = .scaleProportionallyDown
         button.contentTintColor = .secondaryLabelColor
         button.target = self
@@ -218,10 +218,10 @@ final class PopupContentView: NSView, NSTextViewDelegate {
         sourceTextView.textContainer?.widthTracksTextView = true
         sourceTextView.isRichText = false
         sourceTextView.importsGraphics = false
-        sourceTextView.font = .systemFont(ofSize: 13)
+        sourceTextView.font = Theme.Font.body
         sourceTextView.textColor = .labelColor
         sourceTextView.drawsBackground = false
-        sourceTextView.textContainerInset = NSSize(width: 10, height: 10)
+        sourceTextView.textContainerInset = NSSize(width: Theme.Spacing.m, height: Theme.Spacing.m)
         sourceTextView.isAutomaticQuoteSubstitutionEnabled = false
         sourceTextView.isAutomaticDashSubstitutionEnabled = false
         sourceTextView.isAutomaticTextReplacementEnabled = false
@@ -255,7 +255,7 @@ final class PopupContentView: NSView, NSTextViewDelegate {
         resultTextView.isSelectable = true
         resultTextView.isRichText = true
         resultTextView.drawsBackground = false
-        resultTextView.textContainerInset = NSSize(width: 10, height: 10)
+        resultTextView.textContainerInset = NSSize(width: Theme.Spacing.m, height: Theme.Spacing.m)
         resultScroll.documentView = resultTextView
     }
 
@@ -393,9 +393,9 @@ final class PopupContentView: NSView, NSTextViewDelegate {
 
         let toolY = sourceCard.frame.maxY + 10
         translateButton.frame = NSRect(
-            x: width - padding - 72,
+            x: width - padding - 76,
             y: toolY,
-            width: 72,
+            width: 76,
             height: 26
         )
         let statusWidth = max(translateButton.frame.minX - padding - 12, 60)
@@ -423,20 +423,6 @@ final class PopupContentView: NSView, NSTextViewDelegate {
             height: 18
         )
 
-        var badgeX = resultLabel.frame.maxX + 6
-        let badgeLimit = copyButton.frame.minX - 8
-        for badge in badges {
-            let badgeWidth = min(badge.preferredWidth, badgeLimit - badgeX)
-            badge.isHidden = badgeWidth < 24
-            badge.frame = NSRect(
-                x: badgeX,
-                y: resultHeaderY + 2,
-                width: max(badgeWidth, 0),
-                height: 16
-            )
-            badgeX += badgeWidth + 4
-        }
-
         let resultTop = resultHeaderY + 22
         resultCard.frame = NSRect(
             x: padding,
@@ -452,6 +438,8 @@ final class PopupContentView: NSView, NSTextViewDelegate {
             resultScroll.contentView.scroll(to: NSPoint(x: 0, y: clipOrigin.y))
             resultScroll.reflectScrolledClipView(resultScroll.contentView)
         }
+        // 文本容器宽度到这里才是最终值，分隔线宽度只能在这之后对齐
+        updateDividerWidth()
     }
 
     private func updateStatus() {
@@ -467,13 +455,12 @@ final class PopupContentView: NSView, NSTextViewDelegate {
     }
 
     private func updateResults() {
-        rebuildBadges()
         updateCopyMenuAffordance()
 
         if model.results.isEmpty {
             let text = model.isTranslating ? "翻译中…" : "翻译结果会显示在这里"
             let attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 12),
+                .font: Theme.Font.body,
                 .foregroundColor: NSColor.tertiaryLabelColor,
             ]
             resultTextView.textStorage?.setAttributedString(
@@ -484,23 +471,27 @@ final class PopupContentView: NSView, NSTextViewDelegate {
         }
 
         let output = NSMutableAttributedString()
-        let titleAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
-            .foregroundColor: NSColor.secondaryLabelColor,
-        ]
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = 2
         let showTitles = model.results.count > 1
-        var ranges: [String: NSRange] = [:]
+        dividerAttachments.removeAll()
+        dividerBuiltWidth = dividerWidth()
         for (index, result) in model.results.enumerated() {
             if index > 0 {
-                output.append(NSAttributedString(string: "\n\n"))
+                let (divider, attachment) = sectionDivider()
+                dividerAttachments.append((attachment, output.length))
+                output.append(divider)
             }
-            let start = output.length
             if showTitles {
+                let header = NSMutableParagraphStyle()
+                header.paragraphSpacing = Theme.Spacing.xs
                 output.append(NSAttributedString(
                     string: result.title + "\n",
-                    attributes: titleAttributes
+                    attributes: [
+                        .font: Theme.Font.footnoteStrong,
+                        .foregroundColor: NSColor.secondaryLabelColor,
+                        .paragraphStyle: header,
+                    ]
                 ))
             }
 
@@ -519,16 +510,21 @@ final class PopupContentView: NSView, NSTextViewDelegate {
             output.append(NSAttributedString(
                 string: body,
                 attributes: [
-                    .font: NSFont.systemFont(ofSize: 13),
+                    .font: Theme.Font.body,
                     .foregroundColor: color,
                     .paragraphStyle: paragraph,
                 ]
             ))
-            ranges[result.id] = NSRange(location: start, length: output.length - start)
+            if index < model.results.count - 1 {
+                // 段落样式跟的是段落结束符，先补换行结束本节，分隔段才能单独成段
+                output.append(NSAttributedString(
+                    string: "\n",
+                    attributes: [.font: Theme.Font.body, .paragraphStyle: paragraph]
+                ))
+            }
         }
 
         resultTextView.textStorage?.setAttributedString(output)
-        resultRanges = ranges
         // 只在每轮翻译开始时回到顶部，流式更新期间保留用户滚动位置。
         if !didScrollForRun {
             resultTextView.scrollToBeginningOfDocument(nil)
@@ -536,6 +532,58 @@ final class PopupContentView: NSView, NSTextViewDelegate {
         }
         copyButton.isEnabled = !model.primaryText.isEmpty
         needsLayout = true
+    }
+
+    /// 多服务结果之间的分隔线：NSTextBlock 的边线在 NSTextView 里画不出来，
+    /// 改成 1pt 高的可拉伸图片附件，宽度随版心变化时由 layout() 更新。
+    private func sectionDivider() -> (NSAttributedString, NSTextAttachment) {
+        let width = dividerWidth()
+        let rule = NSImage(size: NSSize(width: 1, height: 1), flipped: false) { rect in
+            Theme.separator.setFill()
+            rect.fill()
+            return true
+        }
+        let attachment = NSTextAttachment()
+        attachment.image = rule
+        attachment.bounds = NSRect(x: 0, y: 0, width: width, height: 1)
+
+        let style = NSMutableParagraphStyle()
+        style.paragraphSpacingBefore = Theme.Spacing.m
+        style.paragraphSpacing = Theme.Spacing.m
+        style.minimumLineHeight = 1
+        style.maximumLineHeight = 1
+
+        let divider = NSMutableAttributedString(attachment: attachment)
+        divider.append(NSAttributedString(
+            string: "\n",
+            attributes: [.font: Theme.Font.caption, .paragraphStyle: style]
+        ))
+        divider.addAttribute(
+            .paragraphStyle,
+            value: style,
+            range: NSRange(location: 0, length: divider.length)
+        )
+        return (divider, attachment)
+    }
+
+    /// 分隔线宽度取文本容器宽度，与正文等宽
+    private func dividerWidth() -> CGFloat {
+        resultTextView.textContainer?.containerSize.width ?? 0
+    }
+
+    /// 弹窗可缩放，版心变化后把分隔线附件拉到新宽度
+    private func updateDividerWidth() {
+        guard !dividerAttachments.isEmpty else { return }
+        let width = dividerWidth()
+        guard abs(width - dividerBuiltWidth) > 0.5 else { return }
+        dividerBuiltWidth = width
+        for (attachment, index) in dividerAttachments {
+            attachment.bounds.size.width = width
+            resultTextView.layoutManager?.invalidateLayout(
+                forCharacterRange: NSRange(location: index, length: 1),
+                actualCharacterRange: nil
+            )
+        }
     }
 
     /// 多服务时复制按钮带下拉箭头，点开可选全部或单个服务。
@@ -553,25 +601,6 @@ final class PopupContentView: NSView, NSTextViewDelegate {
 
         guard multiple != copyMenuShown else { return }
         copyMenuShown = multiple
-        needsLayout = true
-    }
-
-    private func rebuildBadges() {
-        let titles = model.results.map(\.title)
-        if badges.count == titles.count,
-           zip(badges, titles).allSatisfy({ pair in pair.0.text == pair.1 }) {
-            return
-        }
-
-        badges.forEach { $0.removeFromSuperview() }
-        badges = model.results.map { result in
-            let badge = BadgeView(text: result.title) { [weak self] in
-                guard let self, let range = self.resultRanges[result.id] else { return }
-                self.resultTextView.scrollRangeToVisible(range)
-            }
-            addSubview(badge)
-            return badge
-        }
         needsLayout = true
     }
 
@@ -696,56 +725,40 @@ final class PopupContentView: NSView, NSTextViewDelegate {
     }
 }
 
-/// 译文服务徽标：小号胶囊，点击跳到对应服务的结果。
-private final class BadgeView: NSView {
-    private let label = NSTextField(labelWithString: "")
-    private let onClick: () -> Void
-    private var naturalSize = NSSize.zero
 
-    var text: String { label.stringValue }
+/// 弹窗主按钮：系统 bezel 在小尺寸下偏灰、圆角也不贴，这里自绘强调色圆角
+final class PrimaryButton: NSButton {
+    override func draw(_ dirtyRect: NSRect) {
+        let base = NSColor.controlAccentColor
+        let pressed = isHighlighted ? 0.18 : 0
+        let fill = isEnabled
+            ? (base.blended(withFraction: pressed, of: .black) ?? base)
+            : base.withAlphaComponent(0.35)
+        fill.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
 
-    init(text: String, onClick: @escaping () -> Void) {
-        self.onClick = onClick
-        super.init(frame: .zero)
-        wantsLayer = true
-        layer?.cornerRadius = 8
-        layer?.backgroundColor = NSColor.secondaryLabelColor
-            .withAlphaComponent(0.12)
-            .cgColor
-        label.font = .systemFont(ofSize: 10, weight: .medium)
-        label.textColor = .secondaryLabelColor
-        label.lineBreakMode = .byTruncatingTail
-        label.stringValue = text
-        label.sizeToFit()
-        naturalSize = label.frame.size
-        addSubview(label)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    var preferredWidth: CGFloat {
-        ceil(naturalSize.width) + 14
-    }
-
-    override func layout() {
-        super.layout()
-        label.frame = NSRect(
-            x: 7,
-            y: (bounds.height - naturalSize.height) / 2,
-            width: min(naturalSize.width, max(bounds.width - 14, 0)),
-            height: naturalSize.height
+        let font = Theme.Font.button
+        let text = title as NSString
+        let textSize = text.size(withAttributes: [.font: font])
+        let iconSize = NSSize(width: 13, height: 13)
+        let gap: CGFloat = 5
+        let iconWidth = image == nil ? 0 : iconSize.width + gap
+        var x = (bounds.width - iconWidth - textSize.width) / 2
+        if let image {
+            image.draw(in: NSRect(
+                x: x,
+                y: (bounds.height - iconSize.height) / 2,
+                width: iconSize.width,
+                height: iconSize.height
+            ))
+            x += iconWidth
+        }
+        text.draw(
+            at: NSPoint(x: x, y: (bounds.height - textSize.height) / 2),
+            withAttributes: [
+                .font: font,
+                .foregroundColor: NSColor.white.withAlphaComponent(isEnabled ? 1 : 0.75),
+            ]
         )
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        guard let hit = super.hitTest(point) else { return nil }
-        return hit.isDescendant(of: self) ? self : hit
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        onClick()
     }
 }

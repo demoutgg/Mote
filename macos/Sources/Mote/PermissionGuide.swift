@@ -143,7 +143,7 @@ final class PermissionGuideController: NSObject, NSWindowDelegate {
         content.addSubview(icon)
 
         let title = NSTextField(labelWithString: "授予 Mote 权限")
-        title.font = .systemFont(ofSize: 17, weight: .semibold)
+        title.font = Theme.Font.large
         title.alignment = .center
         title.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(title)
@@ -151,7 +151,7 @@ final class PermissionGuideController: NSObject, NSWindowDelegate {
         let subtitle = NSTextField(
             labelWithString: "Mote 需要你的许可才能使用，请查看并授权。"
         )
-        subtitle.font = .systemFont(ofSize: 11.5)
+        subtitle.font = Theme.Font.footnote
         subtitle.textColor = .secondaryLabelColor
         subtitle.alignment = .center
         subtitle.translatesAutoresizingMaskIntoConstraints = false
@@ -163,13 +163,11 @@ final class PermissionGuideController: NSObject, NSWindowDelegate {
             return row.view
         }
 
-        let card = NSStackView(views: rowViews)
+        // 复用设置页的卡片：同一套圆角与填充，深浅色都不会白底压白底
+        let card = CardView(views: rowViews)
         card.orientation = .vertical
         card.alignment = .leading
         card.spacing = 1
-        card.wantsLayer = true
-        card.layer?.cornerRadius = 12
-        card.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
         card.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(card)
         for row in rows.values {
@@ -177,8 +175,8 @@ final class PermissionGuideController: NSObject, NSWindowDelegate {
         }
 
         let bottomHint = NSTextField(labelWithString: "授权后回到 Mote 会自动刷新状态。")
-        bottomHint.font = .systemFont(ofSize: 10.5)
-        bottomHint.textColor = .tertiaryLabelColor
+        bottomHint.font = Theme.Font.footnote
+        bottomHint.textColor = .secondaryLabelColor
         bottomHint.alignment = .center
         bottomHint.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(bottomHint)
@@ -220,9 +218,9 @@ final class PermissionGuideController: NSObject, NSWindowDelegate {
         icon.widthAnchor.constraint(equalToConstant: 20).isActive = true
 
         let titleLabel = NSTextField(labelWithString: kind.title)
-        titleLabel.font = .systemFont(ofSize: 13)
+        titleLabel.font = Theme.Font.body
         let detailLabel = NSTextField(labelWithString: kind.detail)
-        detailLabel.font = .systemFont(ofSize: 10.5)
+        detailLabel.font = Theme.Font.footnote
         detailLabel.textColor = .secondaryLabelColor
 
         let labels = NSStackView(views: [titleLabel, detailLabel])
@@ -232,7 +230,7 @@ final class PermissionGuideController: NSObject, NSWindowDelegate {
 
         let granted = kind.isGranted
         let status = NSTextField(labelWithString: granted ? "已授权" : "未授权")
-        status.font = .systemFont(ofSize: 11)
+        status.font = Theme.Font.footnote
         status.textColor = granted ? .systemGreen : .systemOrange
         status.alignment = .right
         status.translatesAutoresizingMaskIntoConstraints = false
@@ -245,7 +243,7 @@ final class PermissionGuideController: NSObject, NSWindowDelegate {
         )
         button.bezelStyle = .rounded
         button.controlSize = .small
-        button.font = .systemFont(ofSize: 11)
+        button.font = Theme.Font.footnote
         // 已授权只留状态文字，避免和左侧「已授权」重复
         button.isHidden = granted
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -486,7 +484,7 @@ private final class GuidancePanel: NSPanel {
 
         let stepLabels = steps.map { text -> NSTextField in
             let label = NSTextField(wrappingLabelWithString: text)
-            label.font = .systemFont(ofSize: 11.5)
+            label.font = Theme.Font.footnote
             label.textColor = .secondaryLabelColor
             return label
         }

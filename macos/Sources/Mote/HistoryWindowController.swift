@@ -26,6 +26,8 @@ final class HistoryWindowController: NSObject, NSWindowDelegate {
             defer: false
         )
         window.title = "Mote 历史记录"
+        // 内容区已有「历史记录」标题，标题栏不再重复
+        window.titleVisibility = .hidden
         let pane = HistoryPane(store: store, showsHeader: true) { [weak self] in
             self?.window?.close()
         }

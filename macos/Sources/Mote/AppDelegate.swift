@@ -63,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
+        applyAppearanceArgument()
         promptPermissionsIfNeeded()
         handlePreviewArgument()
     }
@@ -80,6 +81,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             PermissionGuideController.shared.show()
         }
+    }
+
+    /// 开发用：`--appearance=dark|light` 固定外观，便于截图核对深色样式
+    private func applyAppearanceArgument() {
+        let prefix = "--appearance="
+        guard let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(prefix) }) else {
+            return
+        }
+        let isDark = argument.dropFirst(prefix.count) == "dark"
+        NSApp.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
     }
 
     /// 开发用：带 `--preview=settings|history|permission|popup` 启动时直接开对应窗口，便于截图核对样式

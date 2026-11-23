@@ -5,16 +5,40 @@ final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
-/// 设置卡片容器：底色与描边跟随深浅色外观重设
+/// 设置卡片容器：只靠填充色分层，不用描边；底色跟随深浅色外观重设
 final class CardView: NSStackView {
     override var wantsUpdateLayer: Bool { true }
 
     override func updateLayer() {
         wantsLayer = true
-        layer?.cornerRadius = 12
-        layer?.borderWidth = 1
-        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-        layer?.borderColor = NSColor.separatorColor.cgColor
+        layer?.cornerRadius = Theme.Radius.card
+        layer?.backgroundColor = Theme.cardFill.cgColor
+    }
+
+    /// 切深浅色时 updateLayer 不一定被调用，这里显式标脏
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+}
+
+/// 卡片内的一行：可选在顶部画 1pt 分隔线。
+/// 画在行自身而不是插在行之间，折叠隐藏该行时分隔线会一起消失。
+final class RowStack: NSStackView {
+    var showsTopRule = false {
+        didSet { needsDisplay = true }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard showsTopRule else { return }
+        Theme.separator.setFill()
+        NSRect(
+            x: Theme.Spacing.l,
+            y: bounds.maxY - 1,
+            width: max(0, bounds.width - Theme.Spacing.l * 2),
+            height: 1
+        ).fill()
     }
 }
 
@@ -48,7 +72,7 @@ final class FormPane: NSView {
 
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 6
+        stack.spacing = Theme.Spacing.s
         stack.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(stack)
 
@@ -71,7 +95,7 @@ final class FormPane: NSView {
 
     func addTitle(_ text: String) {
         let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        label.font = Theme.Font.section
         label.textColor = .secondaryLabelColor
         let wrapper = NSStackView(views: [label])
         wrapper.orientation = .vertical
@@ -110,9 +134,11 @@ final class FormPane: NSView {
         card.alignment = .leading
         card.spacing = 0
 
-        for row in rows {
+        for (index, row) in rows.enumerated() {
             card.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: card.widthAnchor).isActive = true
+            // 首行不画线，卡片上缘留白已经足够分层
+            (row as? RowStack)?.showsTopRule = index > 0
         }
         addFullWidth(card)
         return card
@@ -132,7 +158,7 @@ enum FormRow {
         accessory: NSView? = nil
     ) -> NSStackView {
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 13)
+        titleLabel.font = Theme.Font.body
         titleLabel.lineBreakMode = .byTruncatingTail
 
         let labels = NSStackView(views: [titleLabel])
@@ -141,7 +167,7 @@ enum FormRow {
         labels.spacing = 2
         if let detail {
             let detailLabel = NSTextField(labelWithString: detail)
-            detailLabel.font = .systemFont(ofSize: 11)
+            detailLabel.font = Theme.Font.footnote
             detailLabel.textColor = .secondaryLabelColor
             detailLabel.lineBreakMode = .byTruncatingTail
             labels.addArrangedSubview(detailLabel)
@@ -150,12 +176,17 @@ enum FormRow {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let row = NSStackView(views: [labels, spacer])
+        let row = RowStack(views: [labels, spacer])
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.spacing = 12
-        row.edgeInsets = NSEdgeInsets(top: 10, left: 16, bottom: 10, right: 16)
-        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        row.spacing = Theme.Spacing.m
+        row.edgeInsets = NSEdgeInsets(
+            top: 9,
+            left: Theme.Spacing.l,
+            bottom: 9,
+            right: Theme.Spacing.l
+        )
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 38).isActive = true
         labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         if let accessory {
@@ -167,12 +198,17 @@ enum FormRow {
 
     static func noteRow(_ text: String) -> NSStackView {
         let label = NSTextField(wrappingLabelWithString: text)
-        label.font = .systemFont(ofSize: 11)
+        label.font = Theme.Font.footnote
         label.textColor = .secondaryLabelColor
-        let row = NSStackView(views: [label])
+        let row = RowStack(views: [label])
         row.orientation = .vertical
         row.alignment = .leading
-        row.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 10, right: 16)
+        row.edgeInsets = NSEdgeInsets(
+            top: 9,
+            left: Theme.Spacing.l,
+            bottom: 10,
+            right: Theme.Spacing.l
+        )
         return row
     }
 
@@ -191,12 +227,24 @@ enum FormRow {
         return group
     }
 
+    /// 输入框 + 左侧辅助控件（预设下拉、拉取按钮）。
+    /// 辅助控件放左边而不是右边：输入框都定宽，右边缘才能对齐且不长出一条空槽。
+    static func group(_ field: NSView, control: NSView? = nil) -> NSStackView {
+        let group = NSStackView(views: control.map { [$0, field] } ?? [field])
+        group.orientation = .horizontal
+        group.alignment = .centerY
+        group.spacing = Theme.Spacing.s
+        group.translatesAutoresizingMaskIntoConstraints = false
+        return group
+    }
+
     static func textField(width: CGFloat? = 240) -> NSTextField {
         let field = NSTextField()
-        field.font = .systemFont(ofSize: 12)
+        field.font = Theme.Font.body
+        field.bezelStyle = .roundedBezel
         field.alignment = .right
         field.translatesAutoresizingMaskIntoConstraints = false
-        field.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        field.heightAnchor.constraint(equalToConstant: 24).isActive = true
         if let width {
             field.widthAnchor.constraint(equalToConstant: width).isActive = true
         } else {
@@ -208,10 +256,11 @@ enum FormRow {
 
     static func secureField(width: CGFloat? = 240) -> NSSecureTextField {
         let field = NSSecureTextField()
-        field.font = .systemFont(ofSize: 12)
+        field.font = Theme.Font.body
+        field.bezelStyle = .roundedBezel
         field.alignment = .right
         field.translatesAutoresizingMaskIntoConstraints = false
-        field.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        field.heightAnchor.constraint(equalToConstant: 24).isActive = true
         if let width {
             field.widthAnchor.constraint(equalToConstant: width).isActive = true
         } else {
@@ -223,8 +272,8 @@ enum FormRow {
 
     static func popup(width: CGFloat = 240) -> NSPopUpButton {
         let popup = NSPopUpButton(frame: .zero, pullsDown: false)
-        popup.font = .systemFont(ofSize: 12)
-        popup.controlSize = .small
+        popup.font = Theme.Font.body
+        popup.controlSize = .regular
         popup.translatesAutoresizingMaskIntoConstraints = false
         popup.widthAnchor.constraint(equalToConstant: width).isActive = true
         return popup
@@ -234,7 +283,7 @@ enum FormRow {
         let button = NSButton(title: title, target: target, action: action)
         button.bezelStyle = .rounded
         button.controlSize = .small
-        button.font = .systemFont(ofSize: 11)
+        button.font = Theme.Font.footnote
         return button
     }
 
@@ -248,7 +297,7 @@ enum FormRow {
 
     static func valueLabel(_ text: String, width: CGFloat = 52) -> NSTextField {
         let label = NSTextField(labelWithString: text)
-        label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        label.font = Theme.Font.monoDigits
         label.textColor = .secondaryLabelColor
         label.alignment = .right
         label.translatesAutoresizingMaskIntoConstraints = false

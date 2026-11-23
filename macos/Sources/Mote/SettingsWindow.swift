@@ -23,7 +23,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var draftKey = ""
     private var draftBaiduKey = ""
 
-    private var tabControl: NSSegmentedControl!
+    /// 分页由窗口工具栏的图标项承载，按顺序对应 panes
+    private static let paneTabs: [(id: NSToolbarItem.Identifier, label: String, symbol: String)] = [
+        (NSToolbarItem.Identifier("pane.general"), "通用", "gearshape"),
+        (NSToolbarItem.Identifier("pane.services"), "服务", "cloud"),
+        (NSToolbarItem.Identifier("pane.translation"), "翻译", "character.bubble"),
+        (NSToolbarItem.Identifier("pane.history"), "历史", "clock.arrow.circlepath"),
+    ]
     private let warningLabel = NSTextField(labelWithString: "")
     private let saveButton = NSButton()
     private let cancelButton = NSButton()
@@ -85,8 +91,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// 开发用：直接打开指定分页（0 通用 / 1 服务 / 2 翻译 / 3 历史），便于截图核对样式
     func show(pane index: Int) {
         show()
-        guard let tabControl, index >= 0, index < panes.count else { return }
-        tabControl.selectedSegment = index
+        guard index >= 0, index < panes.count else { return }
+        window?.toolbar?.selectedItemIdentifier = Self.paneTabs[index].id
         selectPane(index)
     }
 
@@ -112,7 +118,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.title = "Mote 设置"
         window.isReleasedWhenClosed = false
         window.delegate = self
+        // 分页做成工具栏里的图标项：preference 样式居中排列，标题栏不再重复显示标题
+        window.toolbar = makeToolbar()
+        window.toolbarStyle = .preference
+        window.titleVisibility = .hidden
         window.contentView = makeContentView()
+        window.toolbar?.selectedItemIdentifier = Self.paneTabs[0].id
         window.center()
         self.window = window
         session += 1
@@ -141,7 +152,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         container.subviews.forEach { $0.removeFromSuperview() }
         panes = []
         recorders = []
-        tabControl = nil
         widthSlider = nil
         widthValue = nil
         heightSlider = nil
@@ -182,31 +192,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let content = NSView()
         content.wantsLayer = true
 
-        tabControl = NSSegmentedControl(
-            labels: ["通用", "服务", "翻译", "历史"],
-            trackingMode: .selectOne,
-            target: self,
-            action: #selector(tabChanged(_:))
-        )
-        tabControl.selectedSegment = 0
-        for index in 0..<tabControl.segmentCount {
-            tabControl.setWidth(76, forSegment: index)
-        }
-        tabControl.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(tabControl)
-
         container.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(container)
 
-        let separator = NSView()
-        separator.wantsLayer = true
-        separator.layer?.backgroundColor = NSColor.separatorColor
-            .withAlphaComponent(0.5)
-            .cgColor
+        let separator = SeparatorView()
         separator.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(separator)
 
-        warningLabel.font = .systemFont(ofSize: 11)
+        warningLabel.font = Theme.Font.footnote
         warningLabel.textColor = .systemOrange
         warningLabel.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(warningLabel)
@@ -237,10 +230,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         content.addSubview(footerClearButton)
 
         NSLayoutConstraint.activate([
-            tabControl.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
-            tabControl.centerXAnchor.constraint(equalTo: content.centerXAnchor),
-
-            container.topAnchor.constraint(equalTo: tabControl.bottomAnchor, constant: 10),
+            container.topAnchor.constraint(equalTo: content.topAnchor),
             container.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             container.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             container.bottomAnchor.constraint(equalTo: separator.topAnchor),
@@ -274,8 +264,19 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         return content
     }
 
-    @objc private func tabChanged(_ sender: NSSegmentedControl) {
-        selectPane(sender.selectedSegment)
+    private func makeToolbar() -> NSToolbar {
+        let toolbar = NSToolbar(identifier: "MoteSettingsToolbar")
+        toolbar.delegate = self
+        toolbar.displayMode = .iconAndLabel
+        toolbar.allowsUserCustomization = false
+        toolbar.autosavesConfiguration = false
+        return toolbar
+    }
+
+    @objc private func toolbarTabSelected(_ sender: NSToolbarItem) {
+        guard let index = Self.paneTabs.firstIndex(where: { $0.id == sender.itemIdentifier }) else { return }
+        window?.toolbar?.selectedItemIdentifier = sender.itemIdentifier
+        selectPane(index)
     }
 
     private func selectPane(_ index: Int) {
@@ -304,7 +305,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     /// 各分页统一高度（以历史列表一屏为准），切换分页时窗口不跳动；放不下的内容在分页内滚动
-    private static let fixedWindowHeight: CGFloat = 780
+    private static let fixedWindowHeight: CGFloat = 804
 
     private func resizeWindow() {
         guard let window else { return }
@@ -457,7 +458,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let link = NSButton(title: "github.com/demoutgg/Mote", target: self, action: #selector(openRepo))
         link.isBordered = false
         link.contentTintColor = .linkColor
-        link.font = .systemFont(ofSize: 11)
+        link.font = Theme.Font.footnote
         pane.addCard([
             FormRow.make(title: "Mote", accessory: valueText(version)),
             linkRow(link),
@@ -479,15 +480,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func linkRow(_ button: NSButton) -> NSView {
-        let row = NSStackView(views: [button])
+        let row = RowStack(views: [button])
         row.orientation = .horizontal
-        row.edgeInsets = NSEdgeInsets(top: 6, left: 14, bottom: 6, right: 14)
+        row.edgeInsets = NSEdgeInsets(top: 6, left: Theme.Spacing.l, bottom: 6, right: Theme.Spacing.l)
         return row
     }
 
     private func valueText(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 12)
+        label.font = Theme.Font.footnote
         label.textColor = .secondaryLabelColor
         return label
     }
@@ -507,20 +508,19 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         baiduAppIDField.stringValue = draft.baiduAppID
         baiduKeyField = FormRow.secureField()
         baiduKeyField.stringValue = draftBaiduKey
-        baiduResultLabel = resultLabel()
+        baiduResultLabel = statusLabel()
         baiduTestButton = FormRow.button("测试百度翻译", target: self, action: #selector(testBaidu))
 
-        let baiduTestRow = FormRow.make(title: "连接测试", accessory: baiduTestButton)
+        let baiduTestRow = testRow(baiduResultLabel, button: baiduTestButton)
         let baiduLink = NSButton(title: "打开百度翻译开放平台", target: self, action: #selector(openBaidu))
         baiduLink.isBordered = false
         baiduLink.contentTintColor = .linkColor
-        baiduLink.font = .systemFont(ofSize: 11)
+        baiduLink.font = Theme.Font.footnote
         let baiduRows = [
             FormRow.make(title: "启用百度翻译", accessory: baiduSwitch),
             FormRow.make(title: "AppID", accessory: baiduAppIDField),
             FormRow.make(title: "密钥", accessory: baiduKeyField),
             baiduTestRow,
-            resultRow(baiduResultLabel),
             linkRow(baiduLink),
             FormRow.noteRow("密钥只保存在本机，不会上传。"),
         ]
@@ -533,7 +533,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             target: self,
             action: #selector(llmToggled(_:))
         )
-        endpointField = FormRow.textField(width: 200)
+        // 三个输入框统一 240：接口地址放得下长 base_url，API Key 与模型也同宽
+        endpointField = FormRow.textField(width: 240)
         endpointField.stringValue = draft.endpoint
         endpointField.delegate = self
         presetPopup = FormRow.popup(width: 96)
@@ -545,9 +546,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         presetPopup.target = self
         presetPopup.action = #selector(presetChanged(_:))
 
-        apiKeyField = FormRow.secureField()
+        apiKeyField = FormRow.secureField(width: 240)
         apiKeyField.stringValue = draftKey
-        modelField = FormRow.textField(width: 170)
+        // 模型名普遍偏长（如 workbuddy/hy4flash-free），窄输入框会被截断得看不出全名
+        modelField = FormRow.textField(width: 240)
         modelField.stringValue = draft.model
         modelField.delegate = self
         fetchModelsButton = FormRow.button("获取模型", target: self, action: #selector(fetchModels))
@@ -555,25 +557,31 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         modelPopup.isHidden = true
         modelPopup.target = self
         modelPopup.action = #selector(modelPicked(_:))
-        llmResultLabel = resultLabel()
+        llmResultLabel = statusLabel()
         llmTestButton = FormRow.button("测试连接", target: self, action: #selector(testLLM))
+
+        // 拉取按钮与结果下拉占同一个位置：拉取成功后互换，避免挤占输入框宽度
+        let modelSlot = NSStackView(views: [fetchModelsButton, modelPopup])
+        modelSlot.orientation = .horizontal
+        modelSlot.alignment = .centerY
+        modelSlot.spacing = Theme.Spacing.s
+        modelSlot.translatesAutoresizingMaskIntoConstraints = false
 
         let endpointRow = FormRow.make(
             title: "接口地址",
-            accessory: NSStackView(views: [endpointField, presetPopup])
+            accessory: FormRow.group(endpointField, control: presetPopup)
         )
         let modelRow = FormRow.make(
             title: "模型",
-            accessory: NSStackView(views: [modelField, fetchModelsButton, modelPopup])
+            accessory: FormRow.group(modelField, control: modelSlot)
         )
-        let llmTestRow = FormRow.make(title: "连接测试", accessory: llmTestButton)
+        let llmTestRow = testRow(llmResultLabel, button: llmTestButton)
         let llmRows = [
             FormRow.make(title: "启用 AI 翻译", accessory: llmSwitch),
             endpointRow,
             FormRow.make(title: "API Key", accessory: apiKeyField),
             modelRow,
             llmTestRow,
-            resultRow(llmResultLabel),
             FormRow.noteRow("API Key 只保存在本机，不会上传。"),
         ]
         llmDetailRows = Array(llmRows.dropFirst())
@@ -652,7 +660,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         )
 
         promptTextView = NSTextView()
-        promptTextView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        promptTextView.font = Theme.Font.mono
         promptTextView.isRichText = false
         promptTextView.autoresizingMask = [.width]
         promptTextView.textContainerInset = NSSize(width: 6, height: 6)
@@ -823,6 +831,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         guard let preset = ServicePreset(rawValue: title) else { return }
         endpointField.stringValue = preset.endpoint
         modelField.stringValue = preset.model
+        resetModelPicker()
+    }
+
+    /// 接口地址一变，之前拉到的模型列表就不作数了，换回「获取模型」按钮
+    private func resetModelPicker() {
+        modelPopup?.isHidden = true
+        fetchModelsButton?.isHidden = false
     }
 
     @objc private func modelPicked(_ sender: NSPopUpButton) {
@@ -857,24 +872,26 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         NSWorkspace.shared.open(URL(string: "https://fanyi-api.baidu.com/")!)
     }
 
-    /// 测试结果单独占一行，宽出一行也不会被按钮挤掉
-    private func resultLabel() -> NSTextField {
+    /// 测试结果贴着「连接测试」按钮左侧显示：不额外占行，卡片高度不变，行不会跳动。
+    /// 太长时截断，完整内容放 toolTip。
+    private func statusLabel() -> NSTextField {
         let label = NSTextField(labelWithString: "")
-        label.font = .systemFont(ofSize: 11)
-        label.lineBreakMode = .byWordWrapping
-        label.maximumNumberOfLines = 2
+        label.font = Theme.Font.footnote
+        label.alignment = .right
+        label.lineBreakMode = .byTruncatingTail
         label.isHidden = true
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.widthAnchor.constraint(equalToConstant: 440).isActive = true
+        label.widthAnchor.constraint(lessThanOrEqualToConstant: 260).isActive = true
         return label
     }
 
-    private func resultRow(_ label: NSTextField) -> NSView {
-        let wrapper = NSStackView(views: [label])
-        wrapper.orientation = .vertical
-        wrapper.alignment = .leading
-        wrapper.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 14)
-        return wrapper
+    private func testRow(_ label: NSTextField, button: NSButton) -> NSView {
+        let group = NSStackView(views: [label, button])
+        group.orientation = .horizontal
+        group.alignment = .centerY
+        group.spacing = Theme.Spacing.s
+        group.translatesAutoresizingMaskIntoConstraints = false
+        return FormRow.make(title: "连接测试", accessory: group)
     }
 
     @objc private func testLLM() {
@@ -884,11 +901,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         llmResultLabel.isHidden = false
         llmResultLabel.stringValue = "测试中…"
         llmResultLabel.textColor = .secondaryLabelColor
+        llmResultLabel.toolTip = nil
         let service = self.service
         let session = self.session
         Task { @MainActor [weak self] in
             let start = Date()
             var message = ""
+            var detail: String?
             var color = NSColor.secondaryLabelColor
             do {
                 let output = try await service.translate(
@@ -897,10 +916,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                     apiKey: key
                 ) { _ in }
                 let ms = Int(Date().timeIntervalSince(start) * 1000)
-                message = "连接成功 · \(ms) ms · 返回：\(output.prefix(20))"
+                message = "连接成功 · \(ms) ms"
+                detail = "返回：\(output.prefix(120))"
                 color = .systemGreen
             } catch {
                 message = error.localizedDescription
+                detail = error.localizedDescription
                 color = .systemRed
             }
             // 关窗后控件被 releaseViews() 置空、重开又是新窗口，session 与可选绑定都要过
@@ -909,6 +930,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                   let button = self.llmTestButton else { return }
             label.stringValue = message
             label.textColor = color
+            label.toolTip = detail
             button.isEnabled = true
         }
     }
@@ -920,11 +942,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         baiduResultLabel.isHidden = false
         baiduResultLabel.stringValue = "测试中…"
         baiduResultLabel.textColor = .secondaryLabelColor
+        baiduResultLabel.toolTip = nil
         let service = self.service
         let session = self.session
         Task { @MainActor [weak self] in
             let start = Date()
             var message = ""
+            var detail: String?
             var color = NSColor.secondaryLabelColor
             do {
                 let output = try await service.translateBaidu(
@@ -933,10 +957,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                     secret: secret
                 )
                 let ms = Int(Date().timeIntervalSince(start) * 1000)
-                message = "连接成功 · \(ms) ms · 返回：\(output.prefix(20))"
+                message = "连接成功 · \(ms) ms"
+                detail = "返回：\(output.prefix(120))"
                 color = .systemGreen
             } catch {
                 message = error.localizedDescription
+                detail = error.localizedDescription
                 color = .systemRed
             }
             guard let self, self.window != nil, self.session == session,
@@ -944,6 +970,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                   let button = self.baiduTestButton else { return }
             label.stringValue = message
             label.textColor = color
+            label.toolTip = detail
             button.isEnabled = true
         }
     }
@@ -981,6 +1008,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             popup.addItem(withTitle: "可选 \(models.count) 个")
             popup.addItems(withTitles: models)
             popup.isHidden = false
+            button.isHidden = true
         }
     }
 
@@ -1118,7 +1146,39 @@ extension SettingsWindowController: NSTextFieldDelegate {
     func controlTextDidChange(_ notification: Notification) {
         guard let field = notification.object as? NSTextField,
               field === endpointField || field === modelField else { return }
+        if field === endpointField { resetModelPicker() }
         validate()
     }
 }
 
+
+extension SettingsWindowController: NSToolbarDelegate {
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        Self.paneTabs.map(\.id)
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        Self.paneTabs.map(\.id)
+    }
+
+    /// 声明为可选中的项，AppKit 才会画选中高亮
+    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        Self.paneTabs.map(\.id)
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        guard let tab = Self.paneTabs.first(where: { $0.id == itemIdentifier }) else { return nil }
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        item.label = tab.label
+        item.paletteLabel = tab.label
+        item.image = NSImage(systemSymbolName: tab.symbol, accessibilityDescription: tab.label)
+        item.isBordered = false
+        item.target = self
+        item.action = #selector(toolbarTabSelected(_:))
+        return item
+    }
+}
