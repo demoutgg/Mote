@@ -93,6 +93,12 @@ final class FormPane: NSView {
         ])
     }
 
+    /// 内容自然高度（含上下 16pt 内边距），用于按最高分页给设置窗定高
+    var measuredContentHeight: CGFloat {
+        layoutSubtreeIfNeeded()
+        return stack.fittingSize.height + 32
+    }
+
     func addTitle(_ text: String) {
         let label = NSTextField(labelWithString: text)
         label.font = Theme.Font.section

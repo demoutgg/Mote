@@ -125,6 +125,7 @@ final class PopupController {
         panel.contentView = nil
         popupContent = nil
         contentConfigured = false
+        MemoryPressure.relieve()
 
         if restoreFocus,
            let previousApplication,

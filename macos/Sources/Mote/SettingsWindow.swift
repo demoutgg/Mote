@@ -18,12 +18,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var session = 0
     private var panes: [NSView] = []
     private let container = NSView()
+    private var measuredContentHeight: CGFloat = 640
 
     private var draft = AppConfig()
     private var draftKey = ""
     private var draftBaiduKey = ""
 
-    /// 顶部分页导航，按顺序对应 panes；标题行显示的也是这里的 label
+    /// 顶部分页导航；索引同时决定 makePane 建哪一页，标题行显示的也是这里的 label
     private static let paneTabs: [(label: String, symbol: String)] = [
         ("通用", "gearshape"),
         ("服务", "cloud"),
@@ -82,8 +83,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var temperatureSlider: NSSlider!
     private var temperatureValue: NSTextField!
     private var promptTextView: NSTextView!
-    private var promptToggleButton: NSButton!
-    private var promptRows: [NSView] = []
 
     var onStatusIconPreview: ((String) -> Void)?
 
@@ -132,6 +131,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
         AppActivation.activate(window)
+        // 首次打开时 contentView 里的 selectPane 还没有 window 引用，统一在窗口就位后定高
+        resizeWindow()
         validate()
     }
 
@@ -146,6 +147,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         (notification.object as? NSWindow)?.contentView = nil
         window = nil
         releaseViews()
+        MemoryPressure.relieve()
         onStatusIconPreview?(store.config.statusIcon)
         AppActivation.restoreAccessoryPolicy()
     }
@@ -154,6 +156,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private func releaseViews() {
         container.subviews.forEach { $0.removeFromSuperview() }
         panes = []
+        clearFieldReferences()
+    }
+
+    /// 分页销毁时同步清掉指向其内部控件的引用，下次重建时重新赋值
+    private func clearFieldReferences() {
         recorders = []
         widthField = nil
         widthStepper = nil
@@ -183,8 +190,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         temperatureSlider = nil
         temperatureValue = nil
         promptTextView = nil
-        promptToggleButton = nil
-        promptRows = []
         permissionBanner = nil
     }
 
@@ -279,6 +284,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             HistoryPane(store: history, showsHeader: false),
             makeAboutPane(),
         ]
+        measuredContentHeight = Self.measureContentHeight(panes, width: Self.windowWidth)
         selectPane(0)
         return content
     }
@@ -312,13 +318,42 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         (pane as? FormPane)?.scrollToTop()
     }
 
-    /// 各分页统一高度（以历史列表一屏为准），切换分页时窗口不跳动；放不下的内容在分页内滚动
-    private static let fixedWindowHeight: CGFloat = 804
+    private static let windowWidth: CGFloat = 640
+    /// 标题行 20 + Tab 行 38…94 + 底栏 53，都是分页容器之外的部分
+    private static let chromeHeight: CGFloat = 38 + 56 + 53
+    /// 统一高度取最高分页，但压到这个上限以内，超出的分页自己滚动
+    private static let maxWindowHeight: CGFloat = 780
+
+    /// 在离屏宿主里量各分页的自然高度：文字只有在真实宽度下换行才对，
+    /// 量完取最高值，保证切换分页时窗口高度不变、内容又不被切
+    private static func measureContentHeight(_ panes: [NSView], width: CGFloat) -> CGFloat {
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 400))
+        var result: CGFloat = 0
+        for pane in panes {
+            pane.translatesAutoresizingMaskIntoConstraints = false
+            host.addSubview(pane)
+            let constraints = [
+                pane.topAnchor.constraint(equalTo: host.topAnchor),
+                pane.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                pane.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            ]
+            NSLayoutConstraint.activate(constraints)
+            host.layoutSubtreeIfNeeded()
+            if let form = pane as? FormPane {
+                result = max(result, form.measuredContentHeight)
+            } else {
+                result = max(result, pane.fittingSize.height)
+            }
+            NSLayoutConstraint.deactivate(constraints)
+            pane.removeFromSuperview()
+        }
+        return result
+    }
 
     private func resizeWindow() {
         guard let window else { return }
         let available = (window.screen ?? NSScreen.main)?.visibleFrame.height ?? 900
-        let height = min(Self.fixedWindowHeight, available - 60)
+        let height = min(measuredContentHeight + Self.chromeHeight, Self.maxWindowHeight, available - 60)
         guard abs(window.frame.height - height) > 1 else { return }
         var frame = window.frame
         frame.origin.y += frame.height - height
@@ -745,12 +780,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         temperatureValue.formatter = temperatureFormatter()
         pane.addCard([sliderRow(title: "随机性", slider: temperatureSlider, value: temperatureValue)])
 
-        let toggle = FormRow.button("展开", target: self, action: #selector(togglePrompt))
-        promptToggleButton = toggle
         let toggleRow = FormRow.make(
             title: "系统提示词",
-            detail: "发给模型的 system 内容，可自行调整",
-            accessory: toggle
+            detail: "发给模型的 system 内容，可自行调整"
         )
 
         promptTextView = NSTextView()
@@ -770,7 +802,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         promptScroll.hasVerticalScroller = true
         promptScroll.borderType = .bezelBorder
         promptScroll.translatesAutoresizingMaskIntoConstraints = false
-        promptScroll.heightAnchor.constraint(equalToConstant: 220).isActive = true
+        promptScroll.heightAnchor.constraint(equalToConstant: 180).isActive = true
 
         let resetPrompt = FormRow.button("恢复默认", target: self, action: #selector(resetPrompt))
         let resetRow = NSStackView(views: [
@@ -788,9 +820,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         promptBody.edgeInsets = NSEdgeInsets(top: 2, left: 16, bottom: 8, right: 16)
         promptBody.translatesAutoresizingMaskIntoConstraints = false
         promptScroll.widthAnchor.constraint(equalTo: promptBody.widthAnchor, constant: -32).isActive = true
-        promptBody.isHidden = true
-        promptRows = [promptBody, resetRow]
-        resetRow.isHidden = true
 
         pane.addCard([toggleRow, promptBody, resetRow])
 
@@ -975,16 +1004,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         draft.autoCopy = sender.state == .on
     }
 
-    @objc private func togglePrompt(_ sender: NSButton) {
-        let collapsing = promptRows.first?.isHidden == false
-        promptRows.forEach { $0.isHidden = collapsing }
-        sender.title = collapsing ? "展开" : "收起"
-        // 展开/收起改变了内容高度，窗口跟着伸缩
-        guard panes.count > 2 else { return }
-        container.layoutSubtreeIfNeeded()
-        resizeWindow()
-    }
-
     @objc private func resetPrompt() {
         promptTextView.string = AppConfig.defaultPrompt
     }
@@ -1146,9 +1165,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         config.baiduAppID = baiduAppIDField?.stringValue ?? draft.baiduAppID
         config.temperature = temperatureSlider?.doubleValue ?? draft.temperature
         config.systemPrompt = promptTextView?.string ?? draft.systemPrompt
-        config.llmEnabled = llmSwitch?.state == .on
-        config.baiduEnabled = baiduSwitch?.state == .on
-        config.autoCopy = autoCopySwitch?.state == .on
+        // 分页可能没建（按需构建），没建时沿用 draft，不能当成「关」
+        config.llmEnabled = llmSwitch.map { $0.state == .on } ?? draft.llmEnabled
+        config.baiduEnabled = baiduSwitch.map { $0.state == .on } ?? draft.baiduEnabled
+        config.autoCopy = autoCopySwitch.map { $0.state == .on } ?? draft.autoCopy
         config.targetLanguage =
             languagePopup?.titleOfSelectedItem ?? draft.targetLanguage
         config.statusIcon = statusIconField?.stringValue ?? draft.statusIcon
@@ -1160,8 +1180,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     @objc private func save() {
         let config = collectConfig()
         store.config = config
-        store.apiKey = apiKeyField.stringValue
-        store.baiduKey = baiduKeyField.stringValue
+        store.apiKey = apiKeyField?.stringValue ?? draftKey
+        store.baiduKey = baiduKeyField?.stringValue ?? draftBaiduKey
         store.save()
         onStatusIconPreview?(config.statusIcon)
         // 保存后留在页面上继续调整，用底部提示代替关窗

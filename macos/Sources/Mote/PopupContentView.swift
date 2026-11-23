@@ -293,8 +293,11 @@ final class PopupContentView: NSView, NSTextViewDelegate {
 
         model.$isTranslating
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] translating in
                 self?.updateTranslating()
+                // 翻译结束、结果已经落地，这时请求体与排版中间态都没人引用了，顺势归还给系统
+                guard !translating else { return }
+                DispatchQueue.main.async { MemoryPressure.relieve() }
             }
             .store(in: &cancellables)
 
