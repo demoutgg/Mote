@@ -1,5 +1,5 @@
 // 权限引导：主窗列出两项权限，点授权后另起一个跟随系统设置的小浮条，轮询到授权即收。
-// 不处理：系统自带的「退出并重新打开」TCC 提示；截图走独立子进程，授权后无需重启应用。
+// 系统自带的「退出并重新打开」会把进程杀掉且不拉起，交给 PermissionRestart 收尾。
 import AppKit
 
 enum PermissionKind: CaseIterable {
@@ -312,6 +312,8 @@ final class PermissionGuideController: NSObject, NSWindowDelegate {
     /// 系统设置里勾选没有回调，只能轮询。
     private func startPolling() {
         pollTimer?.invalidate()
+        // 屏幕录制授权会触发系统「退出并重新打开」，进程被杀后由看护脚本拉起
+        PermissionRestart.arm()
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             guard let self, let pending = self.pending else { return }
             // 授权状态要在子进程里查才准，放后台刷新，这轮读上一轮的结果
@@ -345,6 +347,10 @@ final class PermissionGuideController: NSObject, NSWindowDelegate {
         if PermissionKind.allCases.allSatisfy({ $0.isGranted }) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 self?.window?.close()
+            }
+            // 系统若因为新授权要重启进程，这时已经发生；留一段时间窗口再收掉看护
+            DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
+                PermissionRestart.disarm()
             }
         }
     }

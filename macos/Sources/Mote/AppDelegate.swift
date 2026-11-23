@@ -410,6 +410,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quit() {
+        // 主动退出不要被权限看护脚本再拉起来
+        PermissionRestart.disarm()
         NSApp.terminate(nil)
     }
 }
