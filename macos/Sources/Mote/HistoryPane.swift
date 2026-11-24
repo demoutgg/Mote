@@ -300,11 +300,15 @@ private final class HistoryCell: NSTableCellView {
         sourceLabel.stringValue = source
         dateLabel.stringValue = date
 
+        // 富文本会覆盖 cell 的换行设置，段落样式得自己带上，否则长句直接被裁掉而不是省略
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
         let text = NSMutableAttributedString(
             string: target,
             attributes: [
                 .font: Theme.Font.body,
                 .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: paragraph,
             ]
         )
         if let extra {
@@ -313,6 +317,7 @@ private final class HistoryCell: NSTableCellView {
                 attributes: [
                     .font: Theme.Font.footnote,
                     .foregroundColor: NSColor.tertiaryLabelColor,
+                    .paragraphStyle: paragraph,
                 ]
             ))
         }
