@@ -22,10 +22,10 @@
 ## 本机打包
 
 ```bash
-VERSION=0.10.2 ./macos/scripts/package.sh
+VERSION=0.11.0 ./macos/scripts/package.sh
 ```
 
-产物在 `macos/dist/release/`：`Mote-0.10.2-macos.zip`、`Mote-0.10.2-macos.dmg`、`SHA256SUMS.txt`。
+产物在 `macos/dist/release/`：`Mote-0.11.0-macos.zip`、`Mote-0.11.0-macos.dmg`、`SHA256SUMS.txt`。
 
 没有证书时脚本自动使用 ad-hoc 签名，产物能跑但未经公证，用户首次打开需要右键 → 打开。
 
@@ -56,7 +56,7 @@ xcrun notarytool store-credentials "mote-notary" \
 ```bash
 CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
 NOTARY_PROFILE="mote-notary" \
-VERSION=0.10.2 \
+VERSION=0.11.0 \
 ./macos/scripts/package.sh
 ```
 
@@ -77,8 +77,8 @@ signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
 ### 自动（推荐）
 
 ```bash
-git tag v0.10.2
-git push origin v0.10.2
+git tag v0.11.0
+git push origin v0.11.0
 ```
 
 `.github/workflows/release.yml` 会打包 macOS 的 ZIP/DMG 与 Windows 的 ZIP，创建 **draft** Release。到仓库 Releases 页面检查并点击 Publish。
@@ -86,11 +86,11 @@ git push origin v0.10.2
 ### 手动
 
 ```bash
-gh release create v0.10.2 \
-  macos/dist/release/Mote-0.10.2-macos.dmg \
-  macos/dist/release/Mote-0.10.2-macos.zip \
+gh release create v0.11.0 \
+  macos/dist/release/Mote-0.11.0-macos.dmg \
+  macos/dist/release/Mote-0.11.0-macos.zip \
   macos/dist/release/SHA256SUMS.txt \
-  --title "Mote 0.10.2" --notes-file RELEASE_NOTES.md --latest
+  --title "Mote 0.11.0" --notes-file RELEASE_NOTES.md --latest
 ```
 
 Windows 产物由 CI 编译，未经实机运行验证，Release 说明里必须写清这一点。

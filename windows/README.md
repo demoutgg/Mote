@@ -38,7 +38,7 @@ cmake --build build --config Release
 打包：
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File windows/scripts/package.ps1 -Version 0.10.2
+pwsh -NoProfile -ExecutionPolicy Bypass -File windows/scripts/package.ps1 -Version 0.11.0
 ```
 
 ## 说明
