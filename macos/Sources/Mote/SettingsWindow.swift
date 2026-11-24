@@ -1,13 +1,6 @@
 // 设置窗口（纯 AppKit）：分页编辑通用、服务、翻译与历史。
-// 除开机自启（切换即写系统登录项、未保存关窗时回滚）外，保存前都不写入磁盘。
+// 改动即时生效直接落盘，没有保存/取消；非法状态（无可用服务、快捷键重复）只提示不写入。
 import AppKit
-
-private final class SettingsWindow: NSWindow {
-    override func cancelOperation(_ sender: Any?) {
-        close()
-    }
-
-}
 
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let store: SettingsStore
@@ -36,15 +29,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let tabBar = SettingsTabBar(items: SettingsWindowController.paneTabs.map {
         SettingsTabBar.Item(label: $0.label, symbol: $0.symbol)
     })
-    private let warningLabel = NSTextField(labelWithString: "")
-    private let saveButton = NSButton()
-    private let cancelButton = NSButton()
-    /// 历史分页专用：底部条只保留「清空」
-    private let footerClearButton = NSButton()
-    private let footerSeparator = SeparatorView()
-    private var savedHintWorkItem: DispatchWorkItem?
-    /// 上次保存时的开机自启状态，未保存就关窗时用它回滚
-    private var savedLaunchAtLogin = false
+    // 非法状态的就近提示：各自贴在出问题的那张卡片里，没内容时整行收起
+    private let baiduHint = HintRow()
+    private let llmHint = HintRow()
+    private let shortcutHint = HintRow()
+    /// 快捷键被拒时的临时提示到期后回到常规检查
+    private var hintResetWorkItem: DispatchWorkItem?
+    /// 连续拖动（滑块、步进）时合并写入，避免每一帧都落盘
+    private var pendingCommit: DispatchWorkItem?
 
     // 权限
     private var permissionBanner: NSView?
@@ -110,9 +102,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         draft = store.config
         draftKey = store.apiKey
         draftBaiduKey = store.baiduKey
-        savedLaunchAtLogin = LaunchAtLogin.isEnabled
 
-        let window = SettingsWindow(
+        let window = DismissibleWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
@@ -133,17 +124,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         AppActivation.activate(window)
         // 首次打开时 contentView 里的 selectPane 还没有 window 引用，统一在窗口就位后定高
         resizeWindow()
-        validate()
+        refreshHints()
     }
 
 
     func windowWillClose(_ notification: Notification) {
-        savedHintWorkItem?.cancel()
-        savedHintWorkItem = nil
-        // 开机自启切换即写系统登录项，「取消」或未保存关窗要退回上次保存的状态
-        if LaunchAtLogin.isEnabled != savedLaunchAtLogin {
-            try? LaunchAtLogin.set(savedLaunchAtLogin)
-        }
+        hintResetWorkItem?.cancel()
+        hintResetWorkItem = nil
+        // 关窗时正在编辑的输入框还没失焦，先结束编辑把最后一段文字提交掉
+        window?.makeFirstResponder(nil)
+        commit()
         (notification.object as? NSWindow)?.contentView = nil
         window = nil
         releaseViews()
@@ -210,40 +200,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         container.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(container)
 
-        let separator = footerSeparator
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(separator)
-
-        warningLabel.font = Theme.Font.footnote
-        warningLabel.textColor = .systemOrange
-        warningLabel.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(warningLabel)
-
-        cancelButton.title = "取消"
-        cancelButton.target = self
-        cancelButton.action = #selector(cancel)
-        cancelButton.bezelStyle = .rounded
-        cancelButton.keyEquivalent = "\u{1b}"
-        cancelButton.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(cancelButton)
-
-        saveButton.title = "保存"
-        saveButton.target = self
-        saveButton.action = #selector(save)
-        saveButton.bezelStyle = .rounded
-        saveButton.keyEquivalent = "s"
-        saveButton.keyEquivalentModifierMask = [.command]
-        saveButton.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(saveButton)
-
-        footerClearButton.title = "清空"
-        footerClearButton.bezelStyle = .rounded
-        footerClearButton.target = self
-        footerClearButton.action = #selector(clearHistoryFromFooter)
-        footerClearButton.isHidden = true
-        footerClearButton.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(footerClearButton)
-
         NSLayoutConstraint.activate([
             // 标题与红绿灯同一水平线，Tab 行紧随其下
             titleLabel.centerXAnchor.constraint(equalTo: content.centerXAnchor),
@@ -256,32 +212,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             container.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
             container.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             container.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            container.bottomAnchor.constraint(equalTo: separator.topAnchor),
-
-            separator.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            separator.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -52),
-            separator.heightAnchor.constraint(equalToConstant: 1),
-
-            warningLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
-            warningLabel.centerYAnchor.constraint(equalTo: saveButton.centerYAnchor),
-            warningLabel.trailingAnchor.constraint(lessThanOrEqualTo: cancelButton.leadingAnchor, constant: -12),
-
-            saveButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
-            saveButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14),
-
-            cancelButton.trailingAnchor.constraint(equalTo: saveButton.leadingAnchor, constant: -10),
-            cancelButton.centerYAnchor.constraint(equalTo: saveButton.centerYAnchor),
-
-            footerClearButton.trailingAnchor.constraint(equalTo: saveButton.trailingAnchor),
-            footerClearButton.centerYAnchor.constraint(equalTo: saveButton.centerYAnchor),
+            container.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
 
         panes = [
             makeGeneralPane(),
             makeServicesPane(),
             makeTranslationPane(),
-            HistoryPane(store: history, showsHeader: false),
+            HistoryPane(store: history),
             makeAboutPane(),
         ]
         measuredContentHeight = Self.measureContentHeight(panes, width: Self.windowWidth)
@@ -291,6 +229,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private func selectPane(_ index: Int) {
         guard index >= 0, index < panes.count else { return }
+        // 切页会拆掉旧分页的视图，先把正在编辑的输入框结束掉，否则最后一段文字丢失
+        if window?.firstResponder is NSText {
+            window?.makeFirstResponder(nil)
+        }
         panes.forEach { $0.removeFromSuperview() }
         let pane = panes[index]
         pane.translatesAutoresizingMaskIntoConstraints = false
@@ -302,15 +244,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             pane.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
-        // 历史页只留「清空」，关于页整条底栏都不需要
-        let isHistory = pane is HistoryPane
-        let isAbout = pane === panes.last
-        footerClearButton.isHidden = !isHistory
-        cancelButton.isHidden = isHistory || isAbout
-        saveButton.isHidden = isHistory || isAbout
-        warningLabel.isHidden = isHistory || isAbout
-        footerSeparator.isHidden = isAbout
-
         titleLabel.stringValue = "Mote 设置 · \(Self.paneTabs[index].label)"
         tabBar.select(index)
         container.layoutSubtreeIfNeeded()
@@ -319,8 +252,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private static let windowWidth: CGFloat = 640
-    /// 标题行 20 + Tab 行 38…94 + 底栏 53，都是分页容器之外的部分
-    private static let chromeHeight: CGFloat = 38 + 56 + 53
+    /// 标题行 20 + Tab 行 38…94，都是分页容器之外的部分（没有底部按钮条）
+    private static let chromeHeight: CGFloat = 38 + 56
     /// 统一高度取最高分页，但压到这个上限以内，超出的分页自己滚动
     private static let maxWindowHeight: CGFloat = 780
 
@@ -401,10 +334,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             recorder.onChange = { [weak self] binding in
                 guard let self else { return }
                 self.draft.setBinding(binding, for: action)
-                self.validate()
+                self.commit()
             }
             recorder.onReject = { [weak self] message in
-                self?.flashWarning(message)
+                self?.flashShortcutHint(message)
             }
             recorder.translatesAutoresizingMaskIntoConstraints = false
             recorder.widthAnchor.constraint(equalToConstant: 96).isActive = true
@@ -434,6 +367,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         shortcutRows.append(
             FormRow.noteRow("选中翻译需要辅助功能权限；截图功能需要屏幕录制权限。快捷键被占用时，点一下右侧按键重新录制即可。")
         )
+        shortcutRows.append(shortcutHint)
         pane.addCard(shortcutRows)
 
         pane.addTitle("弹窗")
@@ -486,6 +420,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         statusIconField.placeholderString = "custom.icon.name"
         statusIconField.target = self
         statusIconField.action = #selector(statusIconTyped(_:))
+        statusIconField.cell?.sendsActionOnEndEditing = true
 
         pane.addCard([
             FormRow.make(title: "菜单栏图标", accessory: statusIconPopup),
@@ -630,8 +565,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         )
         baiduAppIDField = FormRow.textField()
         baiduAppIDField.stringValue = draft.baiduAppID
+        baiduAppIDField.delegate = self
         baiduKeyField = FormRow.secureField()
         baiduKeyField.stringValue = draftBaiduKey
+        baiduKeyField.delegate = self
         baiduResultLabel = statusLabel()
         baiduTestButton = FormRow.button("测试百度翻译", target: self, action: #selector(testBaidu))
 
@@ -647,8 +584,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             baiduTestRow,
             linkRow(baiduLink),
             FormRow.noteRow("密钥只保存在本机，不会上传。"),
+            baiduHint,
         ]
-        baiduDetailRows = Array(baiduRows.dropFirst())
+        // 提示行不跟着服务开关置灰，开关关掉时它才需要显示
+        baiduDetailRows = baiduRows.dropFirst().filter { $0 !== baiduHint }
         pane.addCard(baiduRows)
 
         pane.addTitle("AI 翻译（OpenAI 兼容）")
@@ -672,6 +611,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         apiKeyField = FormRow.secureField(width: 240)
         apiKeyField.stringValue = draftKey
+        apiKeyField.delegate = self
         // 模型名普遍偏长（如 workbuddy/hy4flash-free），窄输入框会被截断得看不出全名
         modelField = FormRow.textField(width: 240)
         modelField.stringValue = draft.model
@@ -707,8 +647,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             modelRow,
             llmTestRow,
             FormRow.noteRow("API Key 只保存在本机，不会上传。"),
+            llmHint,
         ]
-        llmDetailRows = Array(llmRows.dropFirst())
+        llmDetailRows = llmRows.dropFirst().filter { $0 !== llmHint }
         pane.addCard(llmRows)
 
         setDetails(baiduDetailRows, enabled: draft.baiduEnabled)
@@ -759,6 +700,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         languagePopup = FormRow.popup(width: 200)
         languagePopup.addItems(withTitles: AppConfig.targetLanguages)
         languagePopup.selectItem(withTitle: draft.targetLanguage)
+        languagePopup.target = self
+        languagePopup.action = #selector(languageChanged(_:))
         autoCopySwitch = FormRow.switchButton(
             isOn: draft.autoCopy,
             target: self,
@@ -796,10 +739,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             height: CGFloat.greatestFiniteMagnitude
         )
         promptTextView.string = draft.systemPrompt
+        promptTextView.delegate = self
 
-        let promptScroll = NSScrollView()
+        let promptScroll = SmoothScrollView()
         promptScroll.documentView = promptTextView
         promptScroll.hasVerticalScroller = true
+        promptScroll.scrollerStyle = .overlay
+        promptScroll.autohidesScrollers = true
         promptScroll.borderType = .bezelBorder
         promptScroll.translatesAutoresizingMaskIntoConstraints = false
         promptScroll.heightAnchor.constraint(equalToConstant: 180).isActive = true
@@ -848,6 +794,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         case ControlTag.temperature:
             draft.temperature = sender.doubleValue
             temperatureValue.stringValue = String(format: "%.2f", sender.doubleValue)
+            commitSoon()
         default:
             break
         }
@@ -869,7 +816,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             heightField.stringValue = "\(Int(value))"
             heightStepper.doubleValue = value
         }
-        validate()
+        commitSoon()
     }
 
     /// 直接键入随机性：与滑块双向同步，超范围按边界取值
@@ -878,6 +825,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         draft.temperature = value
         temperatureSlider.doubleValue = value
         sender.stringValue = String(format: "%.2f", value)
+        commit()
+    }
+
+    @objc private func languageChanged(_ sender: NSPopUpButton) {
+        draft.targetLanguage = sender.titleOfSelectedItem ?? draft.targetLanguage
+        commit()
     }
 
     private func temperatureFormatter() -> NumberFormatter {
@@ -897,7 +850,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         draft.resetBinding(for: action)
         recorders[sender.tag].binding = draft.binding(for: action)
         recorders[sender.tag].needsDisplay = true
-        validate()
+        commit()
     }
 
     @objc private func statusIconPicked(_ sender: NSPopUpButton) {
@@ -907,11 +860,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         draft.statusIcon = icon
         statusIconField.stringValue = icon
         updateIconPreview(icon)
+        commit()
     }
 
     @objc private func statusIconTyped(_ sender: NSTextField) {
         draft.statusIcon = sender.stringValue.trimmingCharacters(in: .whitespaces)
         updateIconPreview(draft.statusIcon)
+        commit()
     }
 
     /// 下拉按钮本身已显示所选图标，这里只通知外部同步状态栏预览
@@ -960,13 +915,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     @objc private func baiduToggled(_ sender: NSSwitch) {
         draft.baiduEnabled = sender.state == .on
         setDetails(baiduDetailRows, enabled: draft.baiduEnabled)
-        validate()
+        commit()
     }
 
     @objc private func llmToggled(_ sender: NSSwitch) {
         draft.llmEnabled = sender.state == .on
         setDetails(llmDetailRows, enabled: draft.llmEnabled)
-        validate()
+        commit()
     }
 
     private func setDetails(_ rows: [NSView], enabled: Bool) {
@@ -986,6 +941,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         endpointField.stringValue = preset.endpoint
         modelField.stringValue = preset.model
         resetModelPicker()
+        commit()
     }
 
     /// 接口地址一变，之前拉到的模型列表就不作数了，换回「获取模型」按钮
@@ -998,14 +954,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         // 第 0 项是「可选 N 个」占位，选中它不能当模型名写进输入框
         guard sender.indexOfSelectedItem > 0, let title = sender.titleOfSelectedItem else { return }
         modelField.stringValue = title
+        commit()
     }
 
     @objc private func autoCopyToggled(_ sender: NSSwitch) {
         draft.autoCopy = sender.state == .on
+        commit()
     }
 
     @objc private func resetPrompt() {
         promptTextView.string = AppConfig.defaultPrompt
+        commit()
     }
 
     @objc private func openRepo() {
@@ -1156,7 +1115,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    // MARK: - 保存
+    // MARK: - 即时生效
 
     private func collectConfig() -> AppConfig {
         var config = draft
@@ -1177,52 +1136,74 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         return config
     }
 
-    @objc private func save() {
+    /// 即时生效入口：任何控件改完就落到 config.json 与密钥文件。
+    /// 非法状态只提示不写入——存下去也是一个翻译必定失败的配置。
+    private func commit() {
+        pendingCommit?.cancel()
+        pendingCommit = nil
+
         let config = collectConfig()
+        let noService = !config.llmEnabled && !config.baiduEnabled
+        let missingLLM = config.llmEnabled && (
+            config.endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || config.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        )
+        baiduHint.text = noService ? "至少启用一个翻译服务" : ""
+        llmHint.text = missingLLM ? "启用 AI 服务需要填写接口地址与模型" : ""
+        // 快捷键被拒的临时提示还在显示时不要被覆盖
+        if hintResetWorkItem == nil {
+            shortcutHint.text = shortcutConflict ? "存在重复快捷键" : ""
+        }
+        guard !noService, !missingLLM, !shortcutConflict else { return }
+
+        let key = (apiKeyField?.stringValue ?? draftKey)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let baiduKey = (baiduKeyField?.stringValue ?? draftBaiduKey)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // 没变化就不碰磁盘，尤其是密钥文件
+        guard config != draft || key != draftKey || baiduKey != draftBaiduKey else { return }
+
         store.config = config
-        store.apiKey = apiKeyField?.stringValue ?? draftKey
-        store.baiduKey = baiduKeyField?.stringValue ?? draftBaiduKey
+        store.apiKey = key
+        store.baiduKey = baiduKey
         store.save()
-        onStatusIconPreview?(config.statusIcon)
-        // 保存后留在页面上继续调整，用底部提示代替关窗
-        draft = config
+        // save() 会把字段 trim 并夹到合法区间，回读一遍让内存里的值和磁盘一致
+        draft = store.config
         draftKey = store.apiKey
         draftBaiduKey = store.baiduKey
-        savedLaunchAtLogin = LaunchAtLogin.isEnabled
-        showSavedHint()
+        onStatusIconPreview?(store.config.statusIcon)
     }
 
-    /// 临时提示（如快捷键被拒），2.4s 后回到常规校验文案
-    private func flashWarning(_ message: String) {
-        savedHintWorkItem?.cancel()
-        warningLabel.textColor = .systemOrange
-        warningLabel.stringValue = message
-        warningLabel.isHidden = false
+    /// 滑块拖拽、步进连点会连着触发，合并成一次写入
+    private func commitSoon() {
+        pendingCommit?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.commit() }
+        pendingCommit = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: item)
+    }
+
+    /// 打开窗口时按已保存的值算一次提示，之后由 commit 维护
+    private func refreshHints() {
+        let missingLLM = draft.llmEnabled && (
+            draft.endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || draft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        )
+        baiduHint.text = draft.llmEnabled || draft.baiduEnabled ? "" : "至少启用一个翻译服务"
+        llmHint.text = missingLLM ? "启用 AI 服务需要填写接口地址与模型" : ""
+        shortcutHint.text = shortcutConflict ? "存在重复快捷键" : ""
+    }
+
+    /// 录制快捷键被占用时的临时提示，2.4s 后回到冲突检查
+    private func flashShortcutHint(_ message: String) {
+        hintResetWorkItem?.cancel()
+        shortcutHint.text = message
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            self.savedHintWorkItem = nil
-            self.validate()
+            self.hintResetWorkItem = nil
+            self.shortcutHint.text = self.shortcutConflict ? "存在重复快捷键" : ""
         }
-        savedHintWorkItem = item
+        hintResetWorkItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.4, execute: item)
-    }
-
-    private func showSavedHint() {
-        savedHintWorkItem?.cancel()
-        warningLabel.textColor = .systemGreen
-        warningLabel.stringValue = "已保存"
-        warningLabel.isHidden = false
-        let item = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.savedHintWorkItem = nil
-            self.validate()
-        }
-        savedHintWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: item)
-    }
-
-    @objc private func cancel() {
-        window?.close()
     }
 
     @objc private func openPermissionGuide() {
@@ -1239,10 +1220,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         refreshPermissionBanner()
     }
 
-    @objc private func clearHistoryFromFooter() {
-        (panes.first { $0 is HistoryPane } as? HistoryPane)?.confirmClear()
-    }
-
     private var shortcutConflict: Bool {
         let signatures = ShortcutAction.allCases.map { action -> String in
             let binding = draft.binding(for: action)
@@ -1250,40 +1227,32 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         }
         return Set(signatures).count != signatures.count
     }
-
-    private func validate() {
-        // 用户又改了东西，「已保存」提示立即让位给校验结果
-        savedHintWorkItem?.cancel()
-        savedHintWorkItem = nil
-        warningLabel.textColor = .systemOrange
-        let noService = draft.llmEnabled == false && draft.baiduEnabled == false
-        let conflict = shortcutConflict
-        let endpoint = (endpointField?.stringValue ?? draft.endpoint)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let model = (modelField?.stringValue ?? draft.model)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let missingEndpoint = draft.llmEnabled && (endpoint.isEmpty || model.isEmpty)
-        if noService {
-            warningLabel.stringValue = "至少启用一个翻译服务"
-        } else if missingEndpoint {
-            warningLabel.stringValue = "启用 AI 服务需要填写接口地址与模型"
-        } else if conflict {
-            warningLabel.stringValue = "存在重复快捷键"
-        } else {
-            warningLabel.stringValue = ""
-        }
-        warningLabel.isHidden = warningLabel.stringValue.isEmpty
-        // 两个服务都关、或 AI 服务缺地址/模型时都不能保存，否则存下去也没有可用的翻译能力
-        saveButton.isEnabled = !conflict && !noService && !missingEndpoint
-    }
 }
 
 extension SettingsWindowController: NSTextFieldDelegate {
-    /// 接口地址与模型是自由输入，边打字边重算校验，不等失焦
+    /// 接口地址与模型是自由输入：打字时只刷新提示，落盘等失焦
     func controlTextDidChange(_ notification: Notification) {
         guard let field = notification.object as? NSTextField,
               field === endpointField || field === modelField else { return }
         if field === endpointField { resetModelPicker() }
-        validate()
+        let endpoint = (endpointField?.stringValue ?? draft.endpoint)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = (modelField?.stringValue ?? draft.model)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        llmHint.text = draft.llmEnabled && (endpoint.isEmpty || model.isEmpty)
+            ? "启用 AI 服务需要填写接口地址与模型"
+            : ""
+    }
+
+    /// 失焦即提交，不需要再点保存
+    func controlTextDidEndEditing(_ notification: Notification) {
+        commit()
+    }
+}
+
+extension SettingsWindowController: NSTextViewDelegate {
+    /// 系统提示词同理，编辑结束才写盘
+    func textDidEndEditing(_ notification: Notification) {
+        commit()
     }
 }

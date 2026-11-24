@@ -42,6 +42,41 @@ final class RowStack: NSStackView {
     }
 }
 
+/// 卡片内的橙色提示行：贴在出问题的控件下方，文案为空时整行收起
+final class HintRow: NSStackView {
+    private let label = NSTextField(wrappingLabelWithString: "")
+
+    var text: String {
+        get { label.stringValue }
+        set {
+            label.stringValue = newValue
+            isHidden = newValue.isEmpty
+        }
+    }
+
+    init() {
+        super.init(frame: .zero)
+        label.font = Theme.Font.footnote
+        label.textColor = .systemOrange
+        orientation = .vertical
+        alignment = .leading
+        spacing = 0
+        edgeInsets = NSEdgeInsets(
+            top: 2,
+            left: Theme.Spacing.l,
+            bottom: 9,
+            right: Theme.Spacing.l
+        )
+        addArrangedSubview(label)
+        isHidden = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
 final class FormPane: NSView {
     private let scroll = NSScrollView()
     private let document = FlippedView()
@@ -60,9 +95,9 @@ final class FormPane: NSView {
     private func setup() {
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.drawsBackground = false
-        // 内容超出时才显示滚动条：短页面不留空槽，长页面有明确的可滚动提示
-        scroll.scrollerStyle = .legacy
-        scroll.autohidesScrollers = false
+        // 接鼠标时系统默认给 legacy（15pt 灰轨道），显式 overlay 才是细滑块浮层
+        scroll.scrollerStyle = .overlay
+        scroll.autohidesScrollers = true
         scroll.hasVerticalScroller = false
         scroll.borderType = .noBorder
         addSubview(scroll)

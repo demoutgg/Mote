@@ -19,18 +19,14 @@ final class HistoryWindowController: NSObject, NSWindowDelegate {
             return
         }
 
-        let window = NSWindow(
+        let window = DismissibleWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 520),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Mote 历史记录"
-        // 内容区已有「历史记录」标题，标题栏不再重复
-        window.titleVisibility = .hidden
-        let pane = HistoryPane(store: store, showsHeader: true) { [weak self] in
-            self?.window?.close()
-        }
+        window.title = "历史记录"
+        let pane = HistoryPane(store: store)
         self.pane = pane
         window.contentView = pane
         window.isReleasedWhenClosed = false

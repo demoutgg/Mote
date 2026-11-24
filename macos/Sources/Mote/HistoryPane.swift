@@ -4,12 +4,10 @@ import Combine
 
 final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private let store: HistoryStore
-    private let showsHeader: Bool
-    private let onClose: () -> Void
 
     private let searchField = NSSearchField()
     private let tableView = NSTableView()
-    private let scroll = NSScrollView()
+    private let scroll = SmoothScrollView()
     private let emptyLabel = NSTextField(labelWithString: "")
     private let clearButton = NSButton()
     private var cancellables = Set<AnyCancellable>()
@@ -24,10 +22,8 @@ final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         return formatter
     }()
 
-    init(store: HistoryStore, showsHeader: Bool, onClose: @escaping () -> Void = {}) {
+    init(store: HistoryStore) {
         self.store = store
-        self.showsHeader = showsHeader
-        self.onClose = onClose
         super.init(frame: .zero)
         setup()
         bind()
@@ -40,43 +36,6 @@ final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
     }
 
     private func setup() {
-        let title = NSTextField(labelWithString: "历史记录")
-        title.font = Theme.Font.title
-        title.isHidden = !showsHeader
-
-        // 嵌在设置页时没有标题，把计数降级成小节标题，与「权限」「启动」同级
-        let count = NSTextField(labelWithString: "最近 100 条")
-        count.font = showsHeader ? Theme.Font.footnote : Theme.Font.section
-        count.textColor = showsHeader ? .tertiaryLabelColor : .secondaryLabelColor
-
-        clearButton.title = "清空"
-        clearButton.bezelStyle = .rounded
-        clearButton.controlSize = .small
-        clearButton.font = Theme.Font.footnote
-        clearButton.target = self
-        clearButton.action = #selector(confirmClear)
-        // 嵌在设置页时「清空」移到窗口底部按钮条，避免和「最近 100 条」挤在一行
-        clearButton.isHidden = !showsHeader
-
-        let close = FormRow.button("关闭", target: self, action: #selector(closeWindow))
-        close.isHidden = !showsHeader
-
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        let header = NSStackView(views: [title, count, spacer, clearButton, close])
-        header.orientation = .horizontal
-        header.alignment = .centerY
-        header.spacing = 8
-        header.edgeInsets = NSEdgeInsets(
-            top: showsHeader ? 14 : 6,
-            left: 20,
-            bottom: showsHeader ? 10 : 8,
-            right: 20
-        )
-        header.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(header)
-
         let card = CardView()
         card.orientation = .vertical
         card.spacing = 0
@@ -84,11 +43,7 @@ final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         addSubview(card)
 
         NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: topAnchor),
-            header.leadingAnchor.constraint(equalTo: leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: trailingAnchor),
-
-            card.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 2),
+            card.topAnchor.constraint(equalTo: topAnchor, constant: Theme.Spacing.l),
             card.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
             card.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
             card.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -20),
@@ -100,7 +55,22 @@ final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         searchField.action = #selector(searchChanged)
         searchField.sendsSearchStringImmediately = true
         searchField.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(searchField)
+
+        clearButton.title = "清空"
+        clearButton.bezelStyle = .rounded
+        clearButton.controlSize = .small
+        clearButton.font = Theme.Font.footnote
+        clearButton.target = self
+        clearButton.action = #selector(confirmClear)
+        // 「清空」作用于整个列表，跟搜索框同一行右侧
+        clearButton.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+
+        let searchRow = NSStackView(views: [searchField, clearButton])
+        searchRow.orientation = .horizontal
+        searchRow.alignment = .centerY
+        searchRow.spacing = Theme.Spacing.s
+        searchRow.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(searchRow)
 
         let divider = SeparatorView()
         divider.translatesAutoresizingMaskIntoConstraints = false
@@ -125,6 +95,7 @@ final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         scroll.documentView = tableView
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
+        scroll.scrollerStyle = .overlay
         scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
         scroll.translatesAutoresizingMaskIntoConstraints = false
@@ -137,11 +108,11 @@ final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         card.addSubview(emptyLabel)
 
         NSLayoutConstraint.activate([
-            searchField.topAnchor.constraint(equalTo: card.topAnchor, constant: 10),
-            searchField.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
-            searchField.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+            searchRow.topAnchor.constraint(equalTo: card.topAnchor, constant: 10),
+            searchRow.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
+            searchRow.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
 
-            divider.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: Theme.Spacing.m),
+            divider.topAnchor.constraint(equalTo: searchRow.bottomAnchor, constant: Theme.Spacing.m),
             divider.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Theme.Spacing.l),
             divider.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Theme.Spacing.l),
             divider.heightAnchor.constraint(equalToConstant: 1),
@@ -267,9 +238,6 @@ final class HistoryPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         }
     }
 
-    @objc private func closeWindow() {
-        onClose()
-    }
 }
 
 private final class HistoryCell: NSTableCellView {

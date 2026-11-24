@@ -19,7 +19,7 @@ final class PopupContentView: NSView, NSTextViewDelegate {
     private let sourceLabel = NSTextField(labelWithString: "原文")
     private let clearButton = NSButton()
     private let sourceCard = FillView()
-    private let sourceScroll = NSScrollView()
+    private let sourceScroll = SmoothScrollView()
     private let sourceTextView = PlaceholderTextView()
 
     private let translateButton = PrimaryButton()
@@ -30,7 +30,7 @@ final class PopupContentView: NSView, NSTextViewDelegate {
     private let resultLabel = NSTextField(labelWithString: "译文")
     private let copyButton = NSButton()
     private let resultCard = FillView()
-    private let resultScroll = NSScrollView()
+    private let resultScroll = SmoothScrollView()
     private let resultTextView = NSTextView()
 
     private var copyMenuShown = false
@@ -199,6 +199,7 @@ final class PopupContentView: NSView, NSTextViewDelegate {
     private func configureSourceEditor() {
         sourceScroll.drawsBackground = false
         sourceScroll.hasVerticalScroller = true
+        sourceScroll.scrollerStyle = .overlay
         sourceScroll.autohidesScrollers = true
         sourceScroll.borderType = .noBorder
 
@@ -234,6 +235,7 @@ final class PopupContentView: NSView, NSTextViewDelegate {
     private func configureResultView() {
         resultScroll.drawsBackground = false
         resultScroll.hasVerticalScroller = true
+        resultScroll.scrollerStyle = .overlay
         resultScroll.autohidesScrollers = true
         resultScroll.borderType = .noBorder
 
