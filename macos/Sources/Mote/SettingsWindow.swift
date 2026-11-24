@@ -1160,8 +1160,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let baiduKey = (baiduKeyField?.stringValue ?? draftBaiduKey)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        // 没变化就不碰磁盘，尤其是密钥文件
-        guard config != draft || key != draftKey || baiduKey != draftBaiduKey else { return }
+        // 跟磁盘上的比，不能跟 draft 比：开关/滑块会先把新值写进 draft 再提交
+        guard config != store.config || key != store.apiKey || baiduKey != store.baiduKey else { return }
 
         store.config = config
         store.apiKey = key
